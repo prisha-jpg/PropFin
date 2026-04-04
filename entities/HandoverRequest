@@ -1,0 +1,85 @@
+{
+  "name": "HandoverRequest",
+  "type": "object",
+  "properties": {
+    "request_number": {
+      "type": "string",
+      "description": "Unique handover request number"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "Reference to customer"
+    },
+    "customer_name": {
+      "type": "string",
+      "description": "Customer name"
+    },
+    "sales_order_id": {
+      "type": "string",
+      "description": "Reference to sales order"
+    },
+    "project_name": {
+      "type": "string",
+      "description": "Project name"
+    },
+    "unit_number": {
+      "type": "string",
+      "description": "Unit number"
+    },
+    "request_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Request date"
+    },
+    "total_value": {
+      "type": "number",
+      "description": "Total sale value"
+    },
+    "amount_received": {
+      "type": "number",
+      "description": "Amount received"
+    },
+    "outstanding_amount": {
+      "type": "number",
+      "description": "Outstanding amount"
+    },
+    "payment_percentage": {
+      "type": "number",
+      "description": "Percentage of payment completed"
+    },
+    "handover_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Proposed handover date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "under_review",
+        "approved",
+        "rejected",
+        "completed"
+      ],
+      "default": "pending",
+      "description": "Request status"
+    },
+    "approved_by": {
+      "type": "string",
+      "description": "Approved by"
+    },
+    "approval_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Approval date"
+    },
+    "remarks": {
+      "type": "string",
+      "description": "Remarks"
+    }
+  },
+  "required": [
+    "customer_id",
+    "sales_order_id"
+  ]
+}

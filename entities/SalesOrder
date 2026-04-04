@@ -1,0 +1,108 @@
+{
+  "name": "SalesOrder",
+  "type": "object",
+  "properties": {
+    "order_number": {
+      "type": "string",
+      "description": "Unique sales order number"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "Reference to customer"
+    },
+    "customer_name": {
+      "type": "string",
+      "description": "Customer name for display"
+    },
+    "project_name": {
+      "type": "string",
+      "description": "Project name"
+    },
+    "unit_number": {
+      "type": "string",
+      "description": "Unit/flat number"
+    },
+    "unit_type": {
+      "type": "string",
+      "enum": [
+        "1BHK",
+        "2BHK",
+        "3BHK",
+        "4BHK",
+        "villa",
+        "plot",
+        "commercial",
+        "office"
+      ],
+      "description": "Type of unit"
+    },
+    "total_value": {
+      "type": "number",
+      "description": "Total sale consideration value"
+    },
+    "booking_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Date of booking"
+    },
+    "agreement_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Date of agreement"
+    },
+    "possession_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Expected possession date"
+    },
+    "amount_received": {
+      "type": "number",
+      "description": "Total amount received so far"
+    },
+    "outstanding_amount": {
+      "type": "number",
+      "description": "Outstanding balance"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "booked",
+        "agreement_signed",
+        "under_construction",
+        "ready_for_possession",
+        "handed_over",
+        "cancelled"
+      ],
+      "default": "booked",
+      "description": "Order status"
+    },
+    "payment_plan": {
+      "type": "string",
+      "enum": [
+        "construction_linked",
+        "time_linked",
+        "down_payment",
+        "flexi"
+      ],
+      "description": "Payment plan type"
+    },
+    "stamp_duty": {
+      "type": "number",
+      "description": "Stamp duty amount"
+    },
+    "registration_charges": {
+      "type": "number",
+      "description": "Registration charges"
+    },
+    "gst_amount": {
+      "type": "number",
+      "description": "GST amount"
+    }
+  },
+  "required": [
+    "customer_id",
+    "project_name",
+    "unit_number",
+    "total_value"
+  ]
+}

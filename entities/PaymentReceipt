@@ -1,0 +1,98 @@
+{
+  "name": "PaymentReceipt",
+  "type": "object",
+  "properties": {
+    "receipt_number": {
+      "type": "string",
+      "description": "Unique receipt number"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "Reference to customer"
+    },
+    "customer_name": {
+      "type": "string",
+      "description": "Customer name"
+    },
+    "sales_order_id": {
+      "type": "string",
+      "description": "Reference to sales order"
+    },
+    "project_name": {
+      "type": "string",
+      "description": "Project name"
+    },
+    "unit_number": {
+      "type": "string",
+      "description": "Unit number"
+    },
+    "receipt_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Date of receipt"
+    },
+    "amount": {
+      "type": "number",
+      "description": "Payment amount"
+    },
+    "payment_mode": {
+      "type": "string",
+      "enum": [
+        "cheque",
+        "neft",
+        "rtgs",
+        "upi",
+        "cash",
+        "demand_draft",
+        "online"
+      ],
+      "description": "Mode of payment"
+    },
+    "reference_number": {
+      "type": "string",
+      "description": "Cheque/transaction reference number"
+    },
+    "bank_name": {
+      "type": "string",
+      "description": "Bank name for the payment"
+    },
+    "towards": {
+      "type": "string",
+      "enum": [
+        "booking_amount",
+        "installment",
+        "stamp_duty",
+        "registration",
+        "gst",
+        "interest",
+        "other"
+      ],
+      "description": "Payment towards"
+    },
+    "demand_letter_id": {
+      "type": "string",
+      "description": "Reference to demand letter if applicable"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "received",
+        "cleared",
+        "bounced",
+        "cancelled"
+      ],
+      "default": "received",
+      "description": "Receipt status"
+    },
+    "remarks": {
+      "type": "string",
+      "description": "Additional remarks"
+    }
+  },
+  "required": [
+    "customer_id",
+    "amount",
+    "payment_mode",
+    "receipt_date"
+  ]
+}

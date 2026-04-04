@@ -1,0 +1,51 @@
+{
+  "name": "BankMaster",
+  "type": "object",
+  "properties": {
+    "bank_name": {
+      "type": "string",
+      "description": "Bank name"
+    },
+    "branch_name": {
+      "type": "string",
+      "description": "Branch name"
+    },
+    "ifsc_code": {
+      "type": "string",
+      "description": "IFSC code"
+    },
+    "account_number": {
+      "type": "string",
+      "description": "Account number"
+    },
+    "account_type": {
+      "type": "string",
+      "enum": [
+        "current",
+        "savings",
+        "fixed_deposit"
+      ],
+      "description": "Account type"
+    },
+    "address": {
+      "type": "string",
+      "description": "Branch address"
+    },
+    "contact_person": {
+      "type": "string",
+      "description": "Contact person name"
+    },
+    "contact_phone": {
+      "type": "string",
+      "description": "Contact phone"
+    },
+    "is_active": {
+      "type": "boolean",
+      "description": "Whether active"
+    }
+  },
+  "required": [
+    "bank_name",
+    "ifsc_code"
+  ]
+}

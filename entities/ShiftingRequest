@@ -1,0 +1,80 @@
+{
+  "name": "ShiftingRequest",
+  "type": "object",
+  "properties": {
+    "request_number": {
+      "type": "string",
+      "description": "Unique shifting request number"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "Reference to customer"
+    },
+    "customer_name": {
+      "type": "string",
+      "description": "Customer name"
+    },
+    "current_sales_order_id": {
+      "type": "string",
+      "description": "Current sales order"
+    },
+    "current_project": {
+      "type": "string",
+      "description": "Current project"
+    },
+    "current_unit": {
+      "type": "string",
+      "description": "Current unit"
+    },
+    "new_project": {
+      "type": "string",
+      "description": "New project"
+    },
+    "new_unit": {
+      "type": "string",
+      "description": "New unit"
+    },
+    "new_unit_value": {
+      "type": "number",
+      "description": "New unit value"
+    },
+    "difference_amount": {
+      "type": "number",
+      "description": "Price difference"
+    },
+    "request_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Request date"
+    },
+    "reason": {
+      "type": "string",
+      "description": "Reason for shifting"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "under_review",
+        "approved",
+        "rejected",
+        "completed"
+      ],
+      "default": "pending",
+      "description": "Request status"
+    },
+    "approved_by": {
+      "type": "string",
+      "description": "Approved by"
+    },
+    "remarks": {
+      "type": "string",
+      "description": "Remarks"
+    }
+  },
+  "required": [
+    "customer_id",
+    "current_unit",
+    "new_unit"
+  ]
+}

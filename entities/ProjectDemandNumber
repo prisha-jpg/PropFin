@@ -1,0 +1,30 @@
+{
+  "name": "ProjectDemandNumber",
+  "type": "object",
+  "properties": {
+    "project_name": {
+      "type": "string",
+      "description": "Project name"
+    },
+    "prefix": {
+      "type": "string",
+      "description": "Demand number prefix"
+    },
+    "current_sequence": {
+      "type": "number",
+      "description": "Current sequence number"
+    },
+    "format_pattern": {
+      "type": "string",
+      "description": "Number format pattern e.g. PRJ-DM-{SEQ}"
+    },
+    "is_active": {
+      "type": "boolean",
+      "description": "Whether active"
+    }
+  },
+  "required": [
+    "project_name",
+    "prefix"
+  ]
+}

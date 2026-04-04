@@ -1,0 +1,38 @@
+{
+  "name": "WaiverType",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Waiver type name"
+    },
+    "code": {
+      "type": "string",
+      "description": "Waiver type code"
+    },
+    "description": {
+      "type": "string",
+      "description": "Description"
+    },
+    "max_percentage": {
+      "type": "number",
+      "description": "Maximum waiver percentage allowed"
+    },
+    "requires_approval": {
+      "type": "boolean",
+      "description": "Whether approval is required"
+    },
+    "approval_authority": {
+      "type": "string",
+      "description": "Approval authority"
+    },
+    "is_active": {
+      "type": "boolean",
+      "description": "Whether this waiver type is active"
+    }
+  },
+  "required": [
+    "name",
+    "code"
+  ]
+}

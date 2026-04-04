@@ -1,0 +1,78 @@
+{
+  "name": "ClientTDS",
+  "type": "object",
+  "properties": {
+    "tds_number": {
+      "type": "string",
+      "description": "Unique TDS entry number"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "Reference to customer"
+    },
+    "customer_name": {
+      "type": "string",
+      "description": "Customer name"
+    },
+    "sales_order_id": {
+      "type": "string",
+      "description": "Reference to sales order"
+    },
+    "project_name": {
+      "type": "string",
+      "description": "Project name"
+    },
+    "unit_number": {
+      "type": "string",
+      "description": "Unit number"
+    },
+    "transaction_amount": {
+      "type": "number",
+      "description": "Transaction amount"
+    },
+    "tds_rate": {
+      "type": "number",
+      "description": "TDS rate percentage"
+    },
+    "tds_amount": {
+      "type": "number",
+      "description": "TDS amount"
+    },
+    "deduction_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Date of TDS deduction"
+    },
+    "financial_year": {
+      "type": "string",
+      "description": "Financial year"
+    },
+    "pan_of_deductee": {
+      "type": "string",
+      "description": "PAN of deductee"
+    },
+    "certificate_number": {
+      "type": "string",
+      "description": "TDS certificate number"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "generated",
+        "filed",
+        "certificate_issued"
+      ],
+      "default": "generated",
+      "description": "Status"
+    },
+    "remarks": {
+      "type": "string",
+      "description": "Remarks"
+    }
+  },
+  "required": [
+    "customer_id",
+    "tds_amount",
+    "deduction_date"
+  ]
+}

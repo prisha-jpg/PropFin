@@ -1,0 +1,84 @@
+{
+  "name": "CancellationRequest",
+  "type": "object",
+  "properties": {
+    "request_number": {
+      "type": "string",
+      "description": "Unique cancellation request number"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "Reference to customer"
+    },
+    "customer_name": {
+      "type": "string",
+      "description": "Customer name"
+    },
+    "sales_order_id": {
+      "type": "string",
+      "description": "Reference to sales order"
+    },
+    "project_name": {
+      "type": "string",
+      "description": "Project name"
+    },
+    "unit_number": {
+      "type": "string",
+      "description": "Unit number"
+    },
+    "request_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Request date"
+    },
+    "reason": {
+      "type": "string",
+      "description": "Reason for cancellation"
+    },
+    "total_value": {
+      "type": "number",
+      "description": "Total sale value"
+    },
+    "amount_received": {
+      "type": "number",
+      "description": "Amount received"
+    },
+    "deduction_amount": {
+      "type": "number",
+      "description": "Deduction/forfeiture amount"
+    },
+    "refund_amount": {
+      "type": "number",
+      "description": "Refund amount"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "under_review",
+        "approved",
+        "rejected"
+      ],
+      "default": "pending",
+      "description": "Request status"
+    },
+    "approved_by": {
+      "type": "string",
+      "description": "Approved by"
+    },
+    "approval_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Approval date"
+    },
+    "remarks": {
+      "type": "string",
+      "description": "Remarks"
+    }
+  },
+  "required": [
+    "customer_id",
+    "sales_order_id",
+    "reason"
+  ]
+}

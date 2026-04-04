@@ -1,0 +1,83 @@
+{
+  "name": "Agreement",
+  "type": "object",
+  "properties": {
+    "agreement_number": {
+      "type": "string",
+      "description": "Unique agreement number"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "Reference to customer"
+    },
+    "customer_name": {
+      "type": "string",
+      "description": "Customer name"
+    },
+    "sales_order_id": {
+      "type": "string",
+      "description": "Reference to sales order"
+    },
+    "project_name": {
+      "type": "string",
+      "description": "Project name"
+    },
+    "unit_number": {
+      "type": "string",
+      "description": "Unit number"
+    },
+    "agreement_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Agreement date"
+    },
+    "agreement_value": {
+      "type": "number",
+      "description": "Agreement value"
+    },
+    "stamp_duty": {
+      "type": "number",
+      "description": "Stamp duty"
+    },
+    "registration_fee": {
+      "type": "number",
+      "description": "Registration fee"
+    },
+    "carpet_area": {
+      "type": "number",
+      "description": "Carpet area in sq ft"
+    },
+    "rate_per_sqft": {
+      "type": "number",
+      "description": "Rate per sq ft"
+    },
+    "clauses": {
+      "type": "string",
+      "description": "Key agreement clauses"
+    },
+    "registration_number": {
+      "type": "string",
+      "description": "Registration number"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "executed",
+        "registered",
+        "cancelled"
+      ],
+      "default": "draft",
+      "description": "Agreement status"
+    },
+    "file_url": {
+      "type": "string",
+      "description": "Agreement document URL"
+    }
+  },
+  "required": [
+    "customer_id",
+    "sales_order_id",
+    "agreement_value"
+  ]
+}

@@ -1,0 +1,149 @@
+{
+  "name": "BankDocument",
+  "type": "object",
+  "properties": {
+    "document_number": {
+      "type": "string",
+      "description": "Unique document number"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "Reference to customer"
+    },
+    "customer_name": {
+      "type": "string",
+      "description": "Customer name"
+    },
+    "sales_order_id": {
+      "type": "string",
+      "description": "Reference to sales order"
+    },
+    "project_name": {
+      "type": "string",
+      "description": "Project name"
+    },
+    "unit_number": {
+      "type": "string",
+      "description": "Unit number"
+    },
+    "document_type": {
+      "type": "string",
+      "enum": [
+        "bank_noc",
+        "builder_noc",
+        "noc",
+        "loan_sanction_letter",
+        "tripartite_agreement",
+        "allotment_letter",
+        "payment_receipt",
+        "other"
+      ],
+      "description": "Type of bank document"
+    },
+    "bank_name": {
+      "type": "string",
+      "description": "Bank name"
+    },
+    "branch_name": {
+      "type": "string",
+      "description": "Bank branch"
+    },
+    "loan_account_number": {
+      "type": "string",
+      "description": "Loan account number"
+    },
+    "loan_amount": {
+      "type": "number",
+      "description": "Loan amount"
+    },
+    "noc_issue_date": {
+      "type": "string",
+      "format": "date",
+      "description": "NOC issue date"
+    },
+    "bank_officer_name": {
+      "type": "string",
+      "description": "Bank officer name"
+    },
+    "bank_officer_designation": {
+      "type": "string",
+      "description": "Bank officer designation"
+    },
+    "customer_code": {
+      "type": "string",
+      "description": "Customer code"
+    },
+    "agreement_value": {
+      "type": "number",
+      "description": "Agreement value"
+    },
+    "amount_received_to_date": {
+      "type": "number",
+      "description": "Amount received to date"
+    },
+    "outstanding_amount": {
+      "type": "number",
+      "description": "Outstanding amount"
+    },
+    "noc_purpose": {
+      "type": "string",
+      "enum": [
+        "loan",
+        "resale",
+        "handover"
+      ],
+      "description": "Purpose of NOC"
+    },
+    "authorized_signatory": {
+      "type": "string",
+      "description": "Authorized signatory"
+    },
+    "generated_by": {
+      "type": "string",
+      "description": "User who generated document"
+    },
+    "triggered_by": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "auto_payment_reminder"
+      ],
+      "description": "How document generation was triggered"
+    },
+    "transaction_reference": {
+      "type": "string",
+      "description": "Reference linking related transactions"
+    },
+    "generation_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Generation date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "sent",
+        "acknowledged",
+        "generated",
+        "dispatched",
+        "received_by_bank",
+        "completed"
+      ],
+      "default": "draft",
+      "description": "Document status"
+    },
+    "file_url": {
+      "type": "string",
+      "description": "Uploaded document URL"
+    },
+    "remarks": {
+      "type": "string",
+      "description": "Remarks"
+    }
+  },
+  "required": [
+    "customer_id",
+    "document_type"
+  ]
+}

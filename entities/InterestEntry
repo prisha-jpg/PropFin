@@ -1,0 +1,94 @@
+{
+  "name": "InterestEntry",
+  "type": "object",
+  "properties": {
+    "entry_number": {
+      "type": "string",
+      "description": "Unique entry number"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "Reference to customer"
+    },
+    "customer_name": {
+      "type": "string",
+      "description": "Customer name"
+    },
+    "sales_order_id": {
+      "type": "string",
+      "description": "Reference to sales order"
+    },
+    "project_name": {
+      "type": "string",
+      "description": "Project name"
+    },
+    "unit_number": {
+      "type": "string",
+      "description": "Unit number"
+    },
+    "principal_amount": {
+      "type": "number",
+      "description": "Principal outstanding amount"
+    },
+    "interest_rate": {
+      "type": "number",
+      "description": "Interest rate per annum"
+    },
+    "interest_amount": {
+      "type": "number",
+      "description": "Calculated interest amount"
+    },
+    "period_from": {
+      "type": "string",
+      "format": "date",
+      "description": "Interest period start"
+    },
+    "period_to": {
+      "type": "string",
+      "format": "date",
+      "description": "Interest period end"
+    },
+    "days": {
+      "type": "number",
+      "description": "Number of days"
+    },
+    "entry_type": {
+      "type": "string",
+      "enum": [
+        "calculated",
+        "settled",
+        "waived"
+      ],
+      "default": "calculated",
+      "description": "Entry type"
+    },
+    "settlement_mode": {
+      "type": "string",
+      "enum": [
+        "payment",
+        "waiver",
+        "adjustment"
+      ],
+      "description": "Settlement mode"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "settled",
+        "waived",
+        "partially_settled"
+      ],
+      "default": "pending",
+      "description": "Status"
+    },
+    "remarks": {
+      "type": "string",
+      "description": "Remarks"
+    }
+  },
+  "required": [
+    "customer_id",
+    "interest_amount"
+  ]
+}

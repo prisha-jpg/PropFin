@@ -1,0 +1,84 @@
+{
+  "name": "ResaleRequest",
+  "type": "object",
+  "properties": {
+    "request_number": {
+      "type": "string",
+      "description": "Unique resale request number"
+    },
+    "seller_customer_id": {
+      "type": "string",
+      "description": "Current owner customer ID"
+    },
+    "seller_name": {
+      "type": "string",
+      "description": "Seller name"
+    },
+    "buyer_name": {
+      "type": "string",
+      "description": "New buyer name"
+    },
+    "buyer_phone": {
+      "type": "string",
+      "description": "Buyer phone"
+    },
+    "buyer_email": {
+      "type": "string",
+      "description": "Buyer email"
+    },
+    "sales_order_id": {
+      "type": "string",
+      "description": "Reference to sales order"
+    },
+    "project_name": {
+      "type": "string",
+      "description": "Project name"
+    },
+    "unit_number": {
+      "type": "string",
+      "description": "Unit number"
+    },
+    "resale_value": {
+      "type": "number",
+      "description": "Resale value"
+    },
+    "transfer_charges": {
+      "type": "number",
+      "description": "Transfer charges"
+    },
+    "outstanding_dues": {
+      "type": "number",
+      "description": "Outstanding dues to be settled"
+    },
+    "request_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Request date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "under_review",
+        "approved",
+        "rejected",
+        "completed"
+      ],
+      "default": "pending",
+      "description": "Status"
+    },
+    "approved_by": {
+      "type": "string",
+      "description": "Approved by"
+    },
+    "remarks": {
+      "type": "string",
+      "description": "Remarks"
+    }
+  },
+  "required": [
+    "seller_customer_id",
+    "buyer_name",
+    "unit_number"
+  ]
+}

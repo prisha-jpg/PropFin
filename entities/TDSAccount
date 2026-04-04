@@ -1,0 +1,39 @@
+{
+  "name": "TDSAccount",
+  "type": "object",
+  "properties": {
+    "account_name": {
+      "type": "string",
+      "description": "TDS account name"
+    },
+    "account_code": {
+      "type": "string",
+      "description": "Account code"
+    },
+    "section": {
+      "type": "string",
+      "description": "TDS section e.g. 194IA"
+    },
+    "rate": {
+      "type": "number",
+      "description": "TDS rate percentage"
+    },
+    "threshold_amount": {
+      "type": "number",
+      "description": "Threshold amount"
+    },
+    "description": {
+      "type": "string",
+      "description": "Description"
+    },
+    "is_active": {
+      "type": "boolean",
+      "description": "Whether active"
+    }
+  },
+  "required": [
+    "account_name",
+    "section",
+    "rate"
+  ]
+}

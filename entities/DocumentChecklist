@@ -1,0 +1,37 @@
+{
+  "name": "DocumentChecklist",
+  "type": "object",
+  "properties": {
+    "document_name": {
+      "type": "string",
+      "description": "Document name"
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "booking",
+        "agreement",
+        "construction",
+        "handover",
+        "post_possession"
+      ],
+      "description": "Stage when document is required"
+    },
+    "is_mandatory": {
+      "type": "boolean",
+      "description": "Whether document is mandatory"
+    },
+    "description": {
+      "type": "string",
+      "description": "Description"
+    },
+    "is_active": {
+      "type": "boolean",
+      "description": "Whether active"
+    }
+  },
+  "required": [
+    "document_name",
+    "stage"
+  ]
+}

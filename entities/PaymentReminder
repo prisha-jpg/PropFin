@@ -1,0 +1,99 @@
+{
+  "name": "PaymentReminder",
+  "type": "object",
+  "properties": {
+    "reminder_number": {
+      "type": "string",
+      "description": "Unique reminder number"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "Reference to customer"
+    },
+    "customer_name": {
+      "type": "string",
+      "description": "Customer name"
+    },
+    "sales_order_id": {
+      "type": "string",
+      "description": "Reference to sales order"
+    },
+    "project_name": {
+      "type": "string",
+      "description": "Project name"
+    },
+    "unit_number": {
+      "type": "string",
+      "description": "Unit number"
+    },
+    "outstanding_amount": {
+      "type": "number",
+      "description": "Outstanding amount"
+    },
+    "reminder_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Reminder date"
+    },
+    "due_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Payment due date"
+    },
+    "reminder_type": {
+      "type": "string",
+      "enum": [
+        "first_reminder",
+        "second_reminder",
+        "final_notice",
+        "legal_notice"
+      ],
+      "description": "Reminder type"
+    },
+    "dispatch_mode": {
+      "type": "string",
+      "enum": [
+        "email",
+        "post",
+        "courier",
+        "hand_delivery"
+      ],
+      "description": "Mode of dispatch"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "generated",
+        "dispatched",
+        "acknowledged",
+        "payment_received"
+      ],
+      "default": "generated",
+      "description": "Status"
+    },
+    "has_active_loan_snapshot": {
+      "type": "boolean",
+      "description": "Loan status snapshot at generation"
+    },
+    "transaction_reference": {
+      "type": "string",
+      "description": "Reference linking reminder and auto-generated documents"
+    },
+    "linked_builder_noc_id": {
+      "type": "string",
+      "description": "Linked builder NOC document id"
+    },
+    "linked_documents": {
+      "type": "string",
+      "description": "Human-readable linked documents summary"
+    },
+    "remarks": {
+      "type": "string",
+      "description": "Remarks"
+    }
+  },
+  "required": [
+    "customer_id",
+    "outstanding_amount"
+  ]
+}
