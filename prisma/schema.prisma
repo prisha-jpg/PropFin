@@ -6,3 +6,971 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+model agreement_details {
+  id                   String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sales_order_id       String       @unique @db.Uuid
+  agreement_number     String?      @db.VarChar(50)
+  agreement_date       DateTime?    @db.Date
+  registration_date    DateTime?    @db.Date
+  stamp_duty_amount    Decimal?     @db.Decimal(15, 2)
+  registration_fees    Decimal?     @db.Decimal(15, 2)
+  notary_charges       Decimal?     @db.Decimal(15, 2)
+  agreement_value      Decimal?     @db.Decimal(15, 2)
+  sub_registrar_office String?      @db.VarChar(150)
+  document_number      String?      @db.VarChar(50)
+  agreement_file_path  String?
+  remarks              String?
+  created_at           DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime     @default(now()) @db.Timestamptz(6)
+  created_by           String?      @db.Uuid
+  users                users?       @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders         sales_orders @relation(fields: [sales_order_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model audit_log {
+  id                                String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  table_name                        String   @db.VarChar(80)
+  record_id                         String   @db.Uuid
+  action                            String   @db.VarChar(10)
+  changed_by                        String?  @db.Uuid
+  changed_at                        DateTime @default(now()) @db.Timestamptz(6)
+  old_values                        Json?
+  new_values                        Json?
+  ip_address                        String?  @db.Inet
+  session_id                        String?
+  created_at                        DateTime @default(now()) @db.Timestamptz(6)
+  updated_at                        DateTime @default(now()) @db.Timestamptz(6)
+  created_by                        String?  @db.Uuid
+  users_audit_log_changed_byTousers users?   @relation("audit_log_changed_byTousers", fields: [changed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_audit_log_created_byTousers users?   @relation("audit_log_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([changed_at(sort: Desc)], map: "idx_audit_changed_at")
+  @@index([table_name, record_id], map: "idx_audit_table_record")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model bank_documents {
+  id                                       String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  document_number                          String                     @unique @db.VarChar(50)
+  sales_order_id                           String                     @db.Uuid
+  customer_id                              String                     @db.Uuid
+  bank_id                                  String?                    @db.Uuid
+  document_type                            String                     @db.VarChar(30)
+  trigger_source                           String                     @default("manual") @db.VarChar(30)
+  triggered_by_reference                   String?                    @db.VarChar(50)
+  generation_date                          DateTime                   @db.Date
+  valid_upto                               DateTime?                  @db.Date
+  loan_account_number                      String?                    @db.VarChar(50)
+  loan_amount                              Decimal?                   @db.Decimal(15, 2)
+  bank_officer_name                        String?                    @db.VarChar(100)
+  bank_officer_designation                 String?                    @db.VarChar(100)
+  noc_purpose                              String?                    @db.VarChar(50)
+  document_content                         Json?
+  file_path                                String?
+  status                                   String                     @default("draft") @db.VarChar(20)
+  sent_to                                  String?                    @db.VarChar(150)
+  sent_date                                DateTime?                  @db.Date
+  acknowledged_date                        DateTime?                  @db.Date
+  generated_by                             String?                    @db.Uuid
+  created_at                               DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at                               DateTime                   @default(now()) @db.Timestamptz(6)
+  created_by                               String?                    @db.Uuid
+  bank_master                              bank_master?               @relation(fields: [bank_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_bank_documents_created_byTousers   users?                     @relation("bank_documents_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers                                customers                  @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_bank_documents_generated_byTousers users?                     @relation("bank_documents_generated_byTousers", fields: [generated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders                             sales_orders               @relation(fields: [sales_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  payment_reminder_letters                 payment_reminder_letters[]
+
+  @@index([customer_id], map: "idx_bank_docs_customer")
+  @@index([sales_order_id], map: "idx_bank_docs_order")
+  @@index([trigger_source], map: "idx_bank_docs_trigger")
+}
+
+model bank_master {
+  id              String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  bank_name       String            @db.VarChar(150)
+  branch_name     String?           @db.VarChar(150)
+  ifsc_code       String?           @db.VarChar(15)
+  account_number  String?           @db.VarChar(30)
+  micr_code       String?           @db.VarChar(10)
+  address         String?
+  city            String?           @db.VarChar(80)
+  contact_person  String?           @db.VarChar(100)
+  contact_phone   String?           @db.VarChar(15)
+  is_active       Boolean           @default(true)
+  created_at      DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime          @default(now()) @db.Timestamptz(6)
+  created_by      String?           @db.Uuid
+  bank_documents  bank_documents[]
+  users           users?            @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers       customers[]
+  refund_requests refund_requests[]
+}
+
+model blocks {
+  id                     String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  project_id             String                    @db.Uuid
+  block_code             String                    @db.VarChar(20)
+  block_name             String                    @db.VarChar(100)
+  total_units            Int?
+  is_active              Boolean                   @default(true)
+  created_at             DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                  @default(now()) @db.Timestamptz(6)
+  created_by             String?                   @db.Uuid
+  users                  users?                    @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects               projects                  @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sales_orders           sales_orders[]
+  units                  units[]
+  paymentScheduleMasters payment_schedule_master[]
+
+  @@unique([project_id, block_code])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model cancellation_requests {
+  id                                              String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  request_number                                  String            @unique @db.VarChar(30)
+  sales_order_id                                  String            @db.Uuid
+  customer_id                                     String            @db.Uuid
+  request_date                                    DateTime          @db.Date
+  cancellation_reason                             String?           @db.VarChar(50)
+  reason_description                              String?
+  total_amount_paid                               Decimal?          @db.Decimal(15, 2)
+  cancellation_charges                            Decimal           @default(0) @db.Decimal(15, 2)
+  forfeiture_amount                               Decimal           @default(0) @db.Decimal(15, 2)
+  refundable_amount                               Decimal?          @db.Decimal(15, 2)
+  penalty_percentage                              Decimal?          @db.Decimal(5, 2)
+  status                                          String            @default("pending") @db.VarChar(30)
+  requested_by                                    String?           @db.Uuid
+  approved_by                                     String?           @db.Uuid
+  approval_date                                   DateTime?         @db.Date
+  effective_date                                  DateTime?         @db.Date
+  rejection_reason                                String?
+  created_at                                      DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at                                      DateTime          @default(now()) @db.Timestamptz(6)
+  created_by                                      String?           @db.Uuid
+  users_cancellation_requests_approved_byTousers  users?            @relation("cancellation_requests_approved_byTousers", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_cancellation_requests_created_byTousers   users?            @relation("cancellation_requests_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers                                       customers         @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_cancellation_requests_requested_byTousers users?            @relation("cancellation_requests_requested_byTousers", fields: [requested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders                                    sales_orders      @relation(fields: [sales_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  refund_requests                                 refund_requests[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model client_tds_records {
+  id                                           String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tds_certificate_number                       String             @unique @db.VarChar(50)
+  sales_order_id                               String             @db.Uuid
+  customer_id                                  String             @db.Uuid
+  tds_account_id                               String             @db.Uuid
+  receipt_id                                   String?            @db.Uuid
+  financial_year                               String             @db.VarChar(10)
+  quarter                                      String?            @db.VarChar(5)
+  transaction_date                             DateTime           @db.Date
+  transaction_amount                           Decimal?           @db.Decimal(15, 2)
+  tds_rate                                     Decimal?           @db.Decimal(5, 2)
+  tds_amount                                   Decimal            @db.Decimal(15, 2)
+  pan_of_deductor                              String?            @db.VarChar(10)
+  tan_of_deductor                              String?            @db.VarChar(10)
+  form_26qb_reference                          String?            @db.VarChar(50)
+  acknowledgement_number                       String?            @db.VarChar(50)
+  status                                       String             @default("generated") @db.VarChar(20)
+  generated_by                                 String?            @db.Uuid
+  created_at                                   DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                                   DateTime           @default(now()) @db.Timestamptz(6)
+  created_by                                   String?            @db.Uuid
+  users_client_tds_records_created_byTousers   users?             @relation("client_tds_records_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers                                    customers          @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_client_tds_records_generated_byTousers users?             @relation("client_tds_records_generated_byTousers", fields: [generated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customer_receipts                            customer_receipts? @relation(fields: [receipt_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders                                 sales_orders       @relation(fields: [sales_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tds_accounts                                 tds_accounts       @relation(fields: [tds_account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model customer_co_applicants {
+  id               String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  customer_id      String    @db.Uuid
+  applicant_number Int
+  salutation       String?   @db.VarChar(10)
+  full_name        String    @db.VarChar(200)
+  pan_number       String?   @db.VarChar(10)
+  relation         String?   @db.VarChar(50)
+  phone            String?   @db.VarChar(15)
+  email            String?   @db.VarChar(150)
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime  @default(now()) @db.Timestamptz(6)
+  created_by       String?   @db.Uuid
+  users            users?    @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers        customers @relation(fields: [customer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([customer_id, applicant_number])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model customer_receipts {
+  id                    String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  receipt_number        String                 @unique @db.VarChar(50)
+  sales_order_id        String                 @db.Uuid
+  customer_id           String                 @db.Uuid
+  payment_schedule_id   String?                @db.Uuid
+  receipt_date          DateTime               @db.Date
+  consideration_date    DateTime?              @db.Date
+  amount                Decimal                @db.Decimal(15, 2)
+  payment_mode          String?                @db.VarChar(30)
+  bank_name             String?                @db.VarChar(150)
+  cheque_dd_number      String?                @db.VarChar(50)
+  instrument_date       DateTime?              @db.Date
+  drawee_bank           String?                @db.VarChar(150)
+  transaction_reference String?                @db.VarChar(100)
+  narration             String?
+  receipt_type          String                 @default("payment") @db.VarChar(30)
+  status                String                 @default("received") @db.VarChar(20)
+  cleared_date          DateTime?              @db.Date
+  bounce_reason         String?
+  tds_amount            Decimal                @default(0) @db.Decimal(15, 2)
+  tds_account_id        String?                @db.Uuid
+  created_at            DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime               @default(now()) @db.Timestamptz(6)
+  created_by            String?                @db.Uuid
+  client_tds_records    client_tds_records[]
+  users                 users?                 @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers             customers              @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  payment_schedules     payment_schedules?     @relation(fields: [payment_schedule_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders          sales_orders           @relation(fields: [sales_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tds_accounts          tds_accounts?          @relation(fields: [tds_account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  interest_settlements  interest_settlements[]
+
+  @@index([consideration_date], map: "idx_receipts_consideration")
+  @@index([customer_id], map: "idx_receipts_customer")
+  @@index([receipt_date], map: "idx_receipts_date")
+  @@index([sales_order_id], map: "idx_receipts_order")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model customers {
+  id                                                              String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  customer_code                                                   String                     @unique @db.VarChar(30)
+  salutation                                                      String?                    @db.VarChar(10)
+  first_name                                                      String                     @db.VarChar(80)
+  last_name                                                       String?                    @db.VarChar(80)
+  full_name                                                       String?                    @default(dbgenerated("btrim((((((COALESCE(salutation, ''::character varying))::text || ' '::text) || (first_name)::text) || ' '::text) || (COALESCE(last_name, ''::character varying))::text))")) @db.VarChar(200)
+  date_of_birth                                                   DateTime?                  @db.Date
+  pan_number                                                      String?                    @db.VarChar(10)
+  aadhaar_number                                                  String?                    @db.VarChar(12)
+  email                                                           String?                    @db.VarChar(150)
+  phone_primary                                                   String?                    @db.VarChar(15)
+  phone_secondary                                                 String?                    @db.VarChar(15)
+  address_line1                                                   String?
+  address_line2                                                   String?
+  city                                                            String?                    @db.VarChar(80)
+  state                                                           String?                    @db.VarChar(80)
+  pincode                                                         String?                    @db.VarChar(10)
+  customer_type                                                   String                     @default("individual") @db.VarChar(30)
+  nationality                                                     String                     @default("Indian") @db.VarChar(50)
+  has_active_loan                                                 Boolean                    @default(false)
+  loan_bank_id                                                    String?                    @db.Uuid
+  loan_account_number                                             String?                    @db.VarChar(50)
+  loan_sanctioned_amount                                          Decimal?                   @db.Decimal(15, 2)
+  gstin                                                           String?                    @db.VarChar(20)
+  is_active                                                       Boolean                    @default(true)
+  created_at                                                      DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at                                                      DateTime                   @default(now()) @db.Timestamptz(6)
+  created_by                                                      String?                    @db.Uuid
+  bank_documents                                                  bank_documents[]
+  cancellation_requests                                           cancellation_requests[]
+  client_tds_records                                              client_tds_records[]
+  customer_co_applicants                                          customer_co_applicants[]
+  customer_receipts                                               customer_receipts[]
+  users                                                           users?                     @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  bank_master                                                     bank_master?               @relation(fields: [loan_bank_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  demand_letters                                                  demand_letters[]
+  fpv_calculations                                                fpv_calculations[]
+  handover_requests                                               handover_requests[]
+  interest_entries                                                interest_entries[]
+  interest_settlements                                            interest_settlements[]
+  interest_waiver_requests                                        interest_waiver_requests[]
+  payment_reminder_letters                                        payment_reminder_letters[]
+  refund_requests                                                 refund_requests[]
+  resale_requests_resale_requests_new_customer_idTocustomers      resale_requests[]          @relation("resale_requests_new_customer_idTocustomers")
+  resale_requests_resale_requests_original_customer_idTocustomers resale_requests[]          @relation("resale_requests_original_customer_idTocustomers")
+  sales_orders                                                    sales_orders[]
+  shifting_requests                                               shifting_requests[]
+
+  @@index([customer_code], map: "idx_customers_code")
+  @@index([full_name(ops: raw("gin_trgm_ops"))], map: "idx_customers_name", type: Gin)
+  @@index([pan_number], map: "idx_customers_pan")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model demand_letters {
+  id                  String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  demand_number       String             @unique @db.VarChar(50)
+  sales_order_id      String             @db.Uuid
+  customer_id         String             @db.Uuid
+  payment_schedule_id String?            @db.Uuid
+  demand_type         String?            @db.VarChar(30)
+  demand_date         DateTime           @db.Date
+  due_date            DateTime?          @db.Date
+  principal_amount    Decimal            @default(0) @db.Decimal(15, 2)
+  interest_amount     Decimal            @default(0) @db.Decimal(15, 2)
+  gst_on_interest     Decimal            @default(0) @db.Decimal(15, 2)
+  other_charges       Decimal            @default(0) @db.Decimal(15, 2)
+  total_demand_amount Decimal?           @default(dbgenerated("(((COALESCE(principal_amount, (0)::numeric) + COALESCE(interest_amount, (0)::numeric)) + COALESCE(gst_on_interest, (0)::numeric)) + COALESCE(other_charges, (0)::numeric))")) @db.Decimal(15, 2)
+  status              String             @default("generated") @db.VarChar(20)
+  sent_via            String?            @db.VarChar(30)
+  sent_at             DateTime?          @db.Timestamptz(6)
+  generation_sequence Int                @default(1)
+  letter_content      Json?
+  created_at          DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime           @default(now()) @db.Timestamptz(6)
+  created_by          String?            @db.Uuid
+  users               users?             @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers           customers          @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  payment_schedules   payment_schedules? @relation(fields: [payment_schedule_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders        sales_orders       @relation(fields: [sales_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([customer_id], map: "idx_demand_letters_customer")
+  @@index([sales_order_id], map: "idx_demand_letters_order")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model document_checklist_master {
+  id            String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  document_name String   @db.VarChar(200)
+  stage         String   @db.VarChar(50)
+  is_mandatory  Boolean  @default(true)
+  applicable_to String   @default("all") @db.VarChar(50)
+  display_order Int?
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime @default(now()) @db.Timestamptz(6)
+  created_by    String?  @db.Uuid
+  users         users?   @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model fpv_calculations {
+  id                                        String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  calculation_number                        String       @unique @db.VarChar(30)
+  sales_order_id                            String       @db.Uuid
+  customer_id                               String       @db.Uuid
+  calculation_date                          DateTime     @db.Date
+  horizon_date                              DateTime?    @db.Date
+  interest_rate                             Decimal?     @db.Decimal(6, 4)
+  calculation_type                          String?      @db.VarChar(20)
+  total_agreement_value                     Decimal?     @db.Decimal(15, 2)
+  discount_on_upfront                       Decimal      @default(0) @db.Decimal(15, 2)
+  interest_on_late_payment                  Decimal      @default(0) @db.Decimal(15, 2)
+  net_fpv                                   Decimal?     @db.Decimal(15, 2)
+  schedule_details                          Json?
+  payment_details                           Json?
+  computed_by                               String?      @db.Uuid
+  created_at                                DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at                                DateTime     @default(now()) @db.Timestamptz(6)
+  created_by                                String?      @db.Uuid
+  users_fpv_calculations_computed_byTousers users?       @relation("fpv_calculations_computed_byTousers", fields: [computed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_fpv_calculations_created_byTousers  users?       @relation("fpv_calculations_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers                                 customers    @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders                              sales_orders @relation(fields: [sales_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model handover_requests {
+  id                                          String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  request_number                              String       @unique @db.VarChar(30)
+  sales_order_id                              String       @db.Uuid
+  customer_id                                 String       @db.Uuid
+  request_date                                DateTime     @db.Date
+  proposed_handover_date                      DateTime?    @db.Date
+  actual_handover_date                        DateTime?    @db.Date
+  outstanding_amount                          Decimal      @default(0) @db.Decimal(15, 2)
+  pending_documents                           String[]
+  payment_clearance_status                    Boolean      @default(false)
+  noc_status                                  Boolean      @default(false)
+  status                                      String       @default("pending") @db.VarChar(30)
+  requested_by                                String?      @db.Uuid
+  approved_by                                 String?      @db.Uuid
+  approval_date                               DateTime?    @db.Date
+  rejection_reason                            String?
+  remarks                                     String?
+  created_at                                  DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at                                  DateTime     @default(now()) @db.Timestamptz(6)
+  created_by                                  String?      @db.Uuid
+  users_handover_requests_approved_byTousers  users?       @relation("handover_requests_approved_byTousers", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_handover_requests_created_byTousers   users?       @relation("handover_requests_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers                                   customers    @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_handover_requests_requested_byTousers users?       @relation("handover_requests_requested_byTousers", fields: [requested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders                                sales_orders @relation(fields: [sales_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model interest_calculation_runs {
+  id                                                String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  run_date                                          DateTime           @db.Date
+  period_from                                       DateTime           @db.Date
+  period_to                                         DateTime           @db.Date
+  project_id                                        String?            @db.Uuid
+  customer_group                                    String?            @db.VarChar(50)
+  interest_rate                                     Decimal            @db.Decimal(6, 4)
+  calculation_method                                String?            @db.VarChar(30)
+  status                                            String             @default("pending") @db.VarChar(20)
+  processed_count                                   Int                @default(0)
+  total_interest_generated                          Decimal            @default(0) @db.Decimal(15, 2)
+  run_by                                            String?            @db.Uuid
+  remarks                                           String?
+  created_at                                        DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                                        DateTime           @default(now()) @db.Timestamptz(6)
+  created_by                                        String?            @db.Uuid
+  users_interest_calculation_runs_created_byTousers users?             @relation("interest_calculation_runs_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects                                          projects?          @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_interest_calculation_runs_run_byTousers     users?             @relation("interest_calculation_runs_run_byTousers", fields: [run_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  interest_entries                                  interest_entries[]
+}
+
+/// This table is a partition table and requires additional setup for migrations. Visit https://pris.ly/d/partition-tables for more info.
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model interest_entries {
+  id                        String                    @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  run_id                    String                    @db.Uuid
+  sales_order_id            String                    @db.Uuid
+  customer_id               String                    @db.Uuid
+  period_from               DateTime                  @db.Date
+  period_to                 DateTime                  @db.Date
+  overdue_principal         Decimal?                  @db.Decimal(15, 2)
+  interest_rate             Decimal?                  @db.Decimal(6, 4)
+  days_overdue              Int?
+  interest_amount           Decimal                   @db.Decimal(15, 2)
+  gst_on_interest           Decimal                   @default(0) @db.Decimal(15, 2)
+  net_interest              Decimal?                  @default(dbgenerated("(COALESCE(interest_amount, (0)::numeric) + COALESCE(gst_on_interest, (0)::numeric))")) @db.Decimal(15, 2)
+  status                    String                    @default("active") @db.VarChar(20)
+  waiver_id                 String?                   @db.Uuid
+  settlement_id             String?                   @db.Uuid
+  created_at                DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime                  @default(now()) @db.Timestamptz(6)
+  created_by                String?                   @db.Uuid
+  interest_settlements      interest_settlements?     @relation(fields: [settlement_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_interest_entries_settlement")
+  interest_waiver_requests  interest_waiver_requests? @relation(fields: [waiver_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_interest_entries_waiver")
+  users                     users?                    @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers                 customers                 @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  interest_calculation_runs interest_calculation_runs @relation(fields: [run_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders              sales_orders              @relation(fields: [sales_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([period_from, id])
+  @@index([customer_id], map: "idx_interest_customer")
+  @@index([sales_order_id], map: "idx_interest_order")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model interest_settlements {
+  id                       String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  settlement_number        String                    @unique @db.VarChar(30)
+  sales_order_id           String                    @db.Uuid
+  customer_id              String                    @db.Uuid
+  receipt_id               String?                   @db.Uuid
+  waiver_request_id        String?                   @db.Uuid
+  settlement_date          DateTime                  @db.Date
+  total_interest_due       Decimal?                  @db.Decimal(15, 2)
+  amount_paid              Decimal                   @default(0) @db.Decimal(15, 2)
+  amount_waived            Decimal                   @default(0) @db.Decimal(15, 2)
+  amount_adjusted          Decimal                   @default(0) @db.Decimal(15, 2)
+  balance_remaining        Decimal?                  @default(dbgenerated("(((COALESCE(total_interest_due, (0)::numeric) - COALESCE(amount_paid, (0)::numeric)) - COALESCE(amount_waived, (0)::numeric)) - COALESCE(amount_adjusted, (0)::numeric))")) @db.Decimal(15, 2)
+  settlement_mode          String?                   @db.VarChar(30)
+  remarks                  String?
+  created_at               DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                  @default(now()) @db.Timestamptz(6)
+  created_by               String?                   @db.Uuid
+  interest_entries         interest_entries[]
+  users                    users?                    @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers                customers                 @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customer_receipts        customer_receipts?        @relation(fields: [receipt_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders             sales_orders              @relation(fields: [sales_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  interest_waiver_requests interest_waiver_requests? @relation(fields: [waiver_request_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model interest_waiver_requests {
+  id                                                 String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  request_number                                     String                 @unique @db.VarChar(30)
+  sales_order_id                                     String                 @db.Uuid
+  customer_id                                        String                 @db.Uuid
+  waiver_type_id                                     String                 @db.Uuid
+  interest_entry_ids                                 String[]               @db.Uuid
+  total_interest_amount                              Decimal?               @db.Decimal(15, 2)
+  waiver_requested_amount                            Decimal?               @db.Decimal(15, 2)
+  waiver_approved_amount                             Decimal?               @db.Decimal(15, 2)
+  waiver_percentage                                  Decimal?               @db.Decimal(5, 2)
+  reason                                             String?
+  status                                             String                 @default("pending") @db.VarChar(20)
+  requested_by                                       String?                @db.Uuid
+  reviewed_by                                        String?                @db.Uuid
+  approved_by                                        String?                @db.Uuid
+  request_date                                       DateTime?              @db.Date
+  review_date                                        DateTime?              @db.Date
+  approval_date                                      DateTime?              @db.Date
+  rejection_reason                                   String?
+  created_at                                         DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at                                         DateTime               @default(now()) @db.Timestamptz(6)
+  created_by                                         String?                @db.Uuid
+  interest_entries                                   interest_entries[]
+  interest_settlements                               interest_settlements[]
+  users_interest_waiver_requests_approved_byTousers  users?                 @relation("interest_waiver_requests_approved_byTousers", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_interest_waiver_requests_created_byTousers   users?                 @relation("interest_waiver_requests_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers                                          customers              @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_interest_waiver_requests_requested_byTousers users?                 @relation("interest_waiver_requests_requested_byTousers", fields: [requested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_interest_waiver_requests_reviewed_byTousers  users?                 @relation("interest_waiver_requests_reviewed_byTousers", fields: [reviewed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders                                       sales_orders           @relation(fields: [sales_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  waiver_types                                       waiver_types           @relation(fields: [waiver_type_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model payment_reminder_letters {
+  id                                                 String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  letter_number                                      String          @unique @db.VarChar(50)
+  sales_order_id                                     String          @db.Uuid
+  customer_id                                        String          @db.Uuid
+  generation_date                                    DateTime        @db.Date
+  overdue_amount                                     Decimal?        @db.Decimal(15, 2)
+  overdue_since                                      DateTime?       @db.Date
+  interest_accrued                                   Decimal         @default(0) @db.Decimal(15, 2)
+  total_payable                                      Decimal?        @db.Decimal(15, 2)
+  pay_by_date                                        DateTime?       @db.Date
+  has_active_loan                                    Boolean         @default(false)
+  builder_noc_auto_generated                         Boolean         @default(false)
+  builder_noc_id                                     String?         @db.Uuid
+  letter_content                                     Json?
+  sent_via                                           String?         @db.VarChar(30)
+  sent_at                                            DateTime?       @db.Timestamptz(6)
+  status                                             String          @default("generated") @db.VarChar(20)
+  generated_by                                       String?         @db.Uuid
+  created_at                                         DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at                                         DateTime        @default(now()) @db.Timestamptz(6)
+  created_by                                         String?         @db.Uuid
+  bank_documents                                     bank_documents? @relation(fields: [builder_noc_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_payment_reminder_letters_created_byTousers   users?          @relation("payment_reminder_letters_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers                                          customers       @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_payment_reminder_letters_generated_byTousers users?          @relation("payment_reminder_letters_generated_byTousers", fields: [generated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders                                       sales_orders    @relation(fields: [sales_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model payment_schedules {
+  id                  String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sales_order_id      String              @db.Uuid
+  milestone_name      String              @db.VarChar(150)
+  schedule_type       String?             @db.VarChar(30)
+  percentage_of_total Decimal?            @db.Decimal(6, 3)
+  due_amount          Decimal             @db.Decimal(15, 2)
+  original_due_date   DateTime?           @db.Date
+  revised_due_date    DateTime?           @db.Date
+  status              String              @default("pending") @db.VarChar(20)
+  display_order       Int?
+  created_at          DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime            @default(now()) @db.Timestamptz(6)
+  created_by          String?             @db.Uuid
+  customer_receipts   customer_receipts[]
+  demand_letters      demand_letters[]
+  users               users?              @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders        sales_orders        @relation(fields: [sales_order_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model project_demand_number_config {
+  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  project_id       String   @db.Uuid
+  prefix           String?  @db.VarChar(20)
+  current_sequence Int      @default(0)
+  padding_length   Int      @default(5)
+  financial_year   String?  @db.VarChar(10)
+  is_active        Boolean  @default(true)
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime @default(now()) @db.Timestamptz(6)
+  created_by       String?  @db.Uuid
+  users            users?   @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects         projects @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([project_id, financial_year])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model projects {
+  id                                                            String                         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  project_code                                                  String                         @unique @db.VarChar(20)
+  project_name                                                  String                         @db.VarChar(150)
+  location                                                      String?
+  city                                                          String?                        @db.VarChar(80)
+  state                                                         String?                        @db.VarChar(80)
+  total_units                                                   Int?
+  project_type                                                  String?                        @db.VarChar(50)
+  launch_date                                                   DateTime?                      @db.Date
+  completion_date                                               DateTime?                      @db.Date
+  is_active                                                     Boolean                        @default(true)
+  created_at                                                    DateTime                       @default(now()) @db.Timestamptz(6)
+  updated_at                                                    DateTime                       @default(now()) @db.Timestamptz(6)
+  created_by                                                    String?                        @db.Uuid
+  blocks                                                        blocks[]
+  interest_calculation_runs                                     interest_calculation_runs[]
+  project_demand_number_config                                  project_demand_number_config[]
+  users                                                         users?                         @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders                                                  sales_orders[]
+  shifting_requests_shifting_requests_from_project_idToprojects shifting_requests[]            @relation("shifting_requests_from_project_idToprojects")
+  shifting_requests_shifting_requests_to_project_idToprojects   shifting_requests[]            @relation("shifting_requests_to_project_idToprojects")
+  units                                                         units[]
+  paymentScheduleMasters                                        payment_schedule_master[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model refund_requests {
+  id                                               String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  request_number                                   String                 @unique @db.VarChar(30)
+  cancellation_id                                  String?                @db.Uuid
+  sales_order_id                                   String                 @db.Uuid
+  customer_id                                      String                 @db.Uuid
+  request_date                                     DateTime               @db.Date
+  refund_amount                                    Decimal                @db.Decimal(15, 2)
+  tds_deduction                                    Decimal                @default(0) @db.Decimal(15, 2)
+  net_refund_amount                                Decimal?               @default(dbgenerated("(COALESCE(refund_amount, (0)::numeric) - COALESCE(tds_deduction, (0)::numeric))")) @db.Decimal(15, 2)
+  bank_id                                          String?                @db.Uuid
+  account_holder_name                              String?                @db.VarChar(150)
+  account_number                                   String?                @db.VarChar(30)
+  ifsc_code                                        String?                @db.VarChar(15)
+  payment_mode                                     String?                @db.VarChar(30)
+  status                                           String                 @default("pending") @db.VarChar(30)
+  requested_by                                     String?                @db.Uuid
+  finance_reviewed_by                              String?                @db.Uuid
+  approved_by                                      String?                @db.Uuid
+  disbursed_by                                     String?                @db.Uuid
+  disbursement_date                                DateTime?              @db.Date
+  transaction_reference                            String?                @db.VarChar(100)
+  rejection_reason                                 String?
+  created_at                                       DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at                                       DateTime               @default(now()) @db.Timestamptz(6)
+  created_by                                       String?                @db.Uuid
+  users_refund_requests_approved_byTousers         users?                 @relation("refund_requests_approved_byTousers", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  bank_master                                      bank_master?           @relation(fields: [bank_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  cancellation_requests                            cancellation_requests? @relation(fields: [cancellation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_refund_requests_created_byTousers          users?                 @relation("refund_requests_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers                                        customers              @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_refund_requests_disbursed_byTousers        users?                 @relation("refund_requests_disbursed_byTousers", fields: [disbursed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_refund_requests_finance_reviewed_byTousers users?                 @relation("refund_requests_finance_reviewed_byTousers", fields: [finance_reviewed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_refund_requests_requested_byTousers        users?                 @relation("refund_requests_requested_byTousers", fields: [requested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders                                     sales_orders           @relation(fields: [sales_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model resale_requests {
+  id                                                        String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  request_number                                            String       @unique @db.VarChar(30)
+  sales_order_id                                            String       @db.Uuid
+  original_customer_id                                      String       @db.Uuid
+  new_customer_id                                           String?      @db.Uuid
+  request_date                                              DateTime     @db.Date
+  resale_value                                              Decimal?     @db.Decimal(15, 2)
+  transfer_charges                                          Decimal      @default(0) @db.Decimal(15, 2)
+  outstanding_dues                                          Decimal      @default(0) @db.Decimal(15, 2)
+  noc_required                                              Boolean      @default(true)
+  noc_issued                                                Boolean      @default(false)
+  documents_submitted                                       String[]
+  new_buyer_details                                         Json?
+  status                                                    String       @default("pending") @db.VarChar(30)
+  requested_by                                              String?      @db.Uuid
+  approved_by                                               String?      @db.Uuid
+  approval_date                                             DateTime?    @db.Date
+  completion_date                                           DateTime?    @db.Date
+  rejection_reason                                          String?
+  created_at                                                DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at                                                DateTime     @default(now()) @db.Timestamptz(6)
+  created_by                                                String?      @db.Uuid
+  users_resale_requests_approved_byTousers                  users?       @relation("resale_requests_approved_byTousers", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_resale_requests_created_byTousers                   users?       @relation("resale_requests_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers_resale_requests_new_customer_idTocustomers      customers?   @relation("resale_requests_new_customer_idTocustomers", fields: [new_customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers_resale_requests_original_customer_idTocustomers customers    @relation("resale_requests_original_customer_idTocustomers", fields: [original_customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_resale_requests_requested_byTousers                 users?       @relation("resale_requests_requested_byTousers", fields: [requested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders                                              sales_orders @relation(fields: [sales_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model sales_orders {
+  id                                           String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  order_number                                 String                     @unique @db.VarChar(30)
+  customer_id                                  String                     @db.Uuid
+  project_id                                   String                     @db.Uuid
+  block_id                                     String?                    @db.Uuid
+  unit_id                                      String                     @db.Uuid
+  sales_executive_id                           String?                    @db.Uuid
+  channel                                      String?                    @db.VarChar(50)
+  booking_date                                 DateTime                   @db.Date
+  agreement_date                               DateTime?                  @db.Date
+  agreement_value                              Decimal?                   @db.Decimal(15, 2)
+  basic_sale_value                             Decimal?                   @db.Decimal(15, 2)
+  additional_value                             Decimal                    @default(0) @db.Decimal(15, 2)
+  other_charges                                Decimal                    @default(0) @db.Decimal(15, 2)
+  sgst_amount                                  Decimal                    @default(0) @db.Decimal(15, 2)
+  cgst_amount                                  Decimal                    @default(0) @db.Decimal(15, 2)
+  igst_amount                                  Decimal                    @default(0) @db.Decimal(15, 2)
+  total_value                                  Decimal?                   @default(dbgenerated("(((((COALESCE(basic_sale_value, (0)::numeric) + COALESCE(additional_value, (0)::numeric)) + COALESCE(other_charges, (0)::numeric)) + COALESCE(sgst_amount, (0)::numeric)) + COALESCE(cgst_amount, (0)::numeric)) + COALESCE(igst_amount, (0)::numeric))")) @db.Decimal(15, 2)
+  sale_area                                    Decimal?                   @db.Decimal(10, 2)
+  rate_per_sqft                                Decimal?                   @db.Decimal(10, 2)
+  status                                       String                     @default("open_order") @db.VarChar(30)
+  release_status                               String                     @default("open") @db.VarChar(20)
+  on_hold                                      Boolean                    @default(false)
+  hold_reason                                  String?
+  do_not_process                               Boolean                    @default(false)
+  cancellation_date                            DateTime?                  @db.Date
+  handover_date                                DateTime?                  @db.Date
+  notes                                        String?
+  created_at                                   DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at                                   DateTime                   @default(now()) @db.Timestamptz(6)
+  created_by                                   String?                    @db.Uuid
+  agreement_details                            agreement_details?
+  bank_documents                               bank_documents[]
+  cancellation_requests                        cancellation_requests[]
+  client_tds_records                           client_tds_records[]
+  customer_receipts                            customer_receipts[]
+  demand_letters                               demand_letters[]
+  fpv_calculations                             fpv_calculations[]
+  handover_requests                            handover_requests[]
+  interest_entries                             interest_entries[]
+  interest_settlements                         interest_settlements[]
+  interest_waiver_requests                     interest_waiver_requests[]
+  payment_reminder_letters                     payment_reminder_letters[]
+  payment_schedules                            payment_schedules[]
+  refund_requests                              refund_requests[]
+  resale_requests                              resale_requests[]
+  blocks                                       blocks?                    @relation(fields: [block_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_sales_orders_created_byTousers         users?                     @relation("sales_orders_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers                                    customers                  @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects                                     projects                   @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_sales_orders_sales_executive_idTousers users?                     @relation("sales_orders_sales_executive_idTousers", fields: [sales_executive_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  units                                        units                      @relation(fields: [unit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  shifting_requests                            shifting_requests[]
+
+  @@index([customer_id], map: "idx_sales_orders_customer")
+  @@index([project_id], map: "idx_sales_orders_project")
+  @@index([status], map: "idx_sales_orders_status")
+  @@index([unit_id], map: "idx_sales_orders_unit")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model shifting_requests {
+  id                                                   String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  request_number                                       String       @unique @db.VarChar(30)
+  sales_order_id                                       String       @db.Uuid
+  customer_id                                          String       @db.Uuid
+  from_unit_id                                         String       @db.Uuid
+  to_unit_id                                           String       @db.Uuid
+  from_project_id                                      String?      @db.Uuid
+  to_project_id                                        String?      @db.Uuid
+  request_date                                         DateTime     @db.Date
+  reason                                               String?
+  price_difference                                     Decimal?     @db.Decimal(15, 2)
+  area_difference                                      Decimal?     @db.Decimal(10, 2)
+  floor_difference                                     Int?
+  additional_amount_payable                            Decimal      @default(0) @db.Decimal(15, 2)
+  status                                               String       @default("pending") @db.VarChar(30)
+  requested_by                                         String?      @db.Uuid
+  approved_by                                          String?      @db.Uuid
+  approval_date                                        DateTime?    @db.Date
+  effective_date                                       DateTime?    @db.Date
+  rejection_reason                                     String?
+  created_at                                           DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at                                           DateTime     @default(now()) @db.Timestamptz(6)
+  created_by                                           String?      @db.Uuid
+  users_shifting_requests_approved_byTousers           users?       @relation("shifting_requests_approved_byTousers", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_shifting_requests_created_byTousers            users?       @relation("shifting_requests_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers                                            customers    @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects_shifting_requests_from_project_idToprojects projects?    @relation("shifting_requests_from_project_idToprojects", fields: [from_project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  units_shifting_requests_from_unit_idTounits          units        @relation("shifting_requests_from_unit_idTounits", fields: [from_unit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_shifting_requests_requested_byTousers          users?       @relation("shifting_requests_requested_byTousers", fields: [requested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sales_orders                                         sales_orders @relation(fields: [sales_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects_shifting_requests_to_project_idToprojects   projects?    @relation("shifting_requests_to_project_idToprojects", fields: [to_project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  units_shifting_requests_to_unit_idTounits            units        @relation("shifting_requests_to_unit_idTounits", fields: [to_unit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model tds_accounts {
+  id                 String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  account_code       String               @unique @db.VarChar(30)
+  account_name       String               @db.VarChar(150)
+  tds_section        String?              @db.VarChar(20)
+  tds_rate           Decimal?             @db.Decimal(5, 2)
+  applicable_from    DateTime?            @db.Date
+  applicable_to      DateTime?            @db.Date
+  is_active          Boolean              @default(true)
+  created_at         DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime             @default(now()) @db.Timestamptz(6)
+  created_by         String?              @db.Uuid
+  client_tds_records client_tds_records[]
+  customer_receipts  customer_receipts[]
+  users              users?               @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model units {
+  id                                                      String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  project_id                                              String              @db.Uuid
+  block_id                                                String?             @db.Uuid
+  unit_number                                             String              @db.VarChar(30)
+  floor_number                                            Int?
+  unit_type                                               String?             @db.VarChar(50)
+  carpet_area                                             Decimal?            @db.Decimal(10, 2)
+  built_up_area                                           Decimal?            @db.Decimal(10, 2)
+  super_built_up_area                                     Decimal?            @db.Decimal(10, 2)
+  facing                                                  String?             @db.VarChar(30)
+  base_price                                              Decimal?            @db.Decimal(15, 2)
+  status                                                  String              @default("available") @db.VarChar(30)
+  created_at                                              DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at                                              DateTime            @default(now()) @db.Timestamptz(6)
+  created_by                                              String?             @db.Uuid
+  sales_orders                                            sales_orders[]
+  shifting_requests_shifting_requests_from_unit_idTounits shifting_requests[] @relation("shifting_requests_from_unit_idTounits")
+  shifting_requests_shifting_requests_to_unit_idTounits   shifting_requests[] @relation("shifting_requests_to_unit_idTounits")
+  blocks                                                  blocks?             @relation(fields: [block_id], references: [id], onUpdate: NoAction)
+  users                                                   users?              @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects                                                projects            @relation(fields: [project_id], references: [id], onUpdate: NoAction)
+  unitPricing                                             unit_pricing?
+  quotations                                              quotations[]
+
+  @@unique([project_id, unit_number])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model users {
+  id                                                                    String                         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  employee_code                                                         String                         @unique @db.VarChar(20)
+  full_name                                                             String                         @db.VarChar(150)
+  email                                                                 String                         @unique @db.VarChar(150)
+  phone                                                                 String?                        @db.VarChar(15)
+  role                                                                  String                         @db.VarChar(30)
+  is_active                                                             Boolean                        @default(true)
+  password_hash                                                         String?
+  created_at                                                            DateTime                       @default(now()) @db.Timestamptz(6)
+  updated_at                                                            DateTime                       @default(now()) @db.Timestamptz(6)
+  created_by                                                            String?                        @db.Uuid
+  agreement_details                                                     agreement_details[]
+  audit_log_audit_log_changed_byTousers                                 audit_log[]                    @relation("audit_log_changed_byTousers")
+  audit_log_audit_log_created_byTousers                                 audit_log[]                    @relation("audit_log_created_byTousers")
+  bank_documents_bank_documents_created_byTousers                       bank_documents[]               @relation("bank_documents_created_byTousers")
+  bank_documents_bank_documents_generated_byTousers                     bank_documents[]               @relation("bank_documents_generated_byTousers")
+  bank_master                                                           bank_master[]
+  blocks                                                                blocks[]
+  cancellation_requests_cancellation_requests_approved_byTousers        cancellation_requests[]        @relation("cancellation_requests_approved_byTousers")
+  cancellation_requests_cancellation_requests_created_byTousers         cancellation_requests[]        @relation("cancellation_requests_created_byTousers")
+  cancellation_requests_cancellation_requests_requested_byTousers       cancellation_requests[]        @relation("cancellation_requests_requested_byTousers")
+  client_tds_records_client_tds_records_created_byTousers               client_tds_records[]           @relation("client_tds_records_created_byTousers")
+  client_tds_records_client_tds_records_generated_byTousers             client_tds_records[]           @relation("client_tds_records_generated_byTousers")
+  customer_co_applicants                                                customer_co_applicants[]
+  customer_receipts                                                     customer_receipts[]
+  customers                                                             customers[]
+  demand_letters                                                        demand_letters[]
+  document_checklist_master                                             document_checklist_master[]
+  fpv_calculations_fpv_calculations_computed_byTousers                  fpv_calculations[]             @relation("fpv_calculations_computed_byTousers")
+  fpv_calculations_fpv_calculations_created_byTousers                   fpv_calculations[]             @relation("fpv_calculations_created_byTousers")
+  handover_requests_handover_requests_approved_byTousers                handover_requests[]            @relation("handover_requests_approved_byTousers")
+  handover_requests_handover_requests_created_byTousers                 handover_requests[]            @relation("handover_requests_created_byTousers")
+  handover_requests_handover_requests_requested_byTousers               handover_requests[]            @relation("handover_requests_requested_byTousers")
+  interest_calculation_runs_interest_calculation_runs_created_byTousers interest_calculation_runs[]    @relation("interest_calculation_runs_created_byTousers")
+  interest_calculation_runs_interest_calculation_runs_run_byTousers     interest_calculation_runs[]    @relation("interest_calculation_runs_run_byTousers")
+  interest_entries                                                      interest_entries[]
+  interest_settlements                                                  interest_settlements[]
+  interest_waiver_requests_interest_waiver_requests_approved_byTousers  interest_waiver_requests[]     @relation("interest_waiver_requests_approved_byTousers")
+  interest_waiver_requests_interest_waiver_requests_created_byTousers   interest_waiver_requests[]     @relation("interest_waiver_requests_created_byTousers")
+  interest_waiver_requests_interest_waiver_requests_requested_byTousers interest_waiver_requests[]     @relation("interest_waiver_requests_requested_byTousers")
+  interest_waiver_requests_interest_waiver_requests_reviewed_byTousers  interest_waiver_requests[]     @relation("interest_waiver_requests_reviewed_byTousers")
+  payment_reminder_letters_payment_reminder_letters_created_byTousers   payment_reminder_letters[]     @relation("payment_reminder_letters_created_byTousers")
+  payment_reminder_letters_payment_reminder_letters_generated_byTousers payment_reminder_letters[]     @relation("payment_reminder_letters_generated_byTousers")
+  payment_schedules                                                     payment_schedules[]
+  project_demand_number_config                                          project_demand_number_config[]
+  projects                                                              projects[]
+  refund_requests_refund_requests_approved_byTousers                    refund_requests[]              @relation("refund_requests_approved_byTousers")
+  refund_requests_refund_requests_created_byTousers                     refund_requests[]              @relation("refund_requests_created_byTousers")
+  refund_requests_refund_requests_disbursed_byTousers                   refund_requests[]              @relation("refund_requests_disbursed_byTousers")
+  refund_requests_refund_requests_finance_reviewed_byTousers            refund_requests[]              @relation("refund_requests_finance_reviewed_byTousers")
+  refund_requests_refund_requests_requested_byTousers                   refund_requests[]              @relation("refund_requests_requested_byTousers")
+  resale_requests_resale_requests_approved_byTousers                    resale_requests[]              @relation("resale_requests_approved_byTousers")
+  resale_requests_resale_requests_created_byTousers                     resale_requests[]              @relation("resale_requests_created_byTousers")
+  resale_requests_resale_requests_requested_byTousers                   resale_requests[]              @relation("resale_requests_requested_byTousers")
+  sales_orders_sales_orders_created_byTousers                           sales_orders[]                 @relation("sales_orders_created_byTousers")
+  sales_orders_sales_orders_sales_executive_idTousers                   sales_orders[]                 @relation("sales_orders_sales_executive_idTousers")
+  shifting_requests_shifting_requests_approved_byTousers                shifting_requests[]            @relation("shifting_requests_approved_byTousers")
+  shifting_requests_shifting_requests_created_byTousers                 shifting_requests[]            @relation("shifting_requests_created_byTousers")
+  shifting_requests_shifting_requests_requested_byTousers               shifting_requests[]            @relation("shifting_requests_requested_byTousers")
+  tds_accounts                                                          tds_accounts[]
+  units                                                                 units[]
+  users                                                                 users?                         @relation("usersTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_users_created_by")
+  other_users                                                           users[]                        @relation("usersTousers")
+  waiver_types                                                          waiver_types[]
+  unitPricings                                                          unit_pricing[]
+  paymentScheduleMasters                                                payment_schedule_master[]
+  quotations                                                            quotations[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model waiver_types {
+  id                       String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  waiver_code              String                     @unique @db.VarChar(20)
+  waiver_name              String                     @db.VarChar(150)
+  description              String?
+  max_waiver_percent       Decimal?                   @db.Decimal(5, 2)
+  requires_approval        Boolean                    @default(true)
+  approval_level           String?                    @db.VarChar(30)
+  is_active                Boolean                    @default(true)
+  created_at               DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                   @default(now()) @db.Timestamptz(6)
+  created_by               String?                    @db.Uuid
+  interest_waiver_requests interest_waiver_requests[]
+  users                    users?                     @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model unit_pricing {
+  id                  String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  unit_id             String   @unique @db.Uuid
+  classification      String?  @db.VarChar(50)
+  rate_per_sqft       Decimal? @db.Decimal(15, 2)
+  basic_sale_value    Decimal? @db.Decimal(15, 2)
+  caic_charges        Decimal? @db.Decimal(15, 2)
+  maintenance_deposit Decimal? @db.Decimal(15, 2)
+  total_sale_value    Decimal? @db.Decimal(15, 2)
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime @default(now()) @db.Timestamptz(6)
+  created_by          String?  @db.Uuid
+
+  units units  @relation(fields: [unit_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users users? @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model payment_schedule_master {
+  id                  String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  project_id          String   @db.Uuid
+  block_id            String?  @db.Uuid
+  milestone_name      String   @db.VarChar(150)
+  percentage_of_total Decimal  @db.Decimal(6, 3)
+  display_order       Int      @default(0)
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime @default(now()) @db.Timestamptz(6)
+  created_by          String?  @db.Uuid
+
+  projects projects @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  blocks   blocks?  @relation(fields: [block_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users    users?   @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model quotations {
+  id                 String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  quotation_number   String    @unique @db.VarChar(50)
+  unit_id            String    @db.Uuid
+  customer_name      String    @db.VarChar(150)
+  customer_email     String?   @db.VarChar(150)
+  customer_phone     String?   @db.VarChar(50)
+  total_value        Decimal   @db.Decimal(15, 2)
+  generated_schedule Json?
+  valid_until        DateTime? @db.Date
+  status             String    @default("draft") @db.VarChar(30)
+  created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
+  created_by         String?   @db.Uuid
+
+  units units  @relation(fields: [unit_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users users? @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}

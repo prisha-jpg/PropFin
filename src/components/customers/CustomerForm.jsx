@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { toast } from "sonner";
 
 export default function CustomerForm({ customer, onSubmit, onCancel, isLoading }) {
   const [form, setForm] = useState({
@@ -27,10 +28,28 @@ export default function CustomerForm({ customer, onSubmit, onCancel, isLoading }
     notes: customer?.notes || ""
   });
 
-  const handleChange = (field, value) => setForm(p => ({ ...p, [field]: value }));
+  const handleChange = (field, value) => {
+    setForm(p => ({ ...p, [field]: value }));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+
+    if (!form.full_name || !form.phone) {
+      toast.error("Customer name and phone are required.");
+      return;
+    }
+
+    try {
+      onSubmit(form);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(message || "Something went wrong while saving the customer.");
+    }
+  };
 
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit(form); }} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label>Full Name *</Label>
@@ -50,7 +69,11 @@ export default function CustomerForm({ customer, onSubmit, onCancel, isLoading }
         </div>
         <div className="space-y-1.5">
           <Label>PAN Number</Label>
-          <Input value={form.pan_number} onChange={e => handleChange("pan_number", e.target.value)} placeholder="ABCDE1234F" />
+          <Input 
+            value={form.pan_number} 
+            onChange={e => handleChange("pan_number", e.target.value)} 
+            placeholder="ABCDE1234F"
+          />
         </div>
         <div className="space-y-1.5">
           <Label>Aadhaar Number</Label>
@@ -127,7 +150,12 @@ export default function CustomerForm({ customer, onSubmit, onCancel, isLoading }
 
       <div className="flex justify-end gap-3 pt-2">
         <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button type="submit" disabled={isLoading}>{customer ? "Update" : "Create"} Customer</Button>
+        <Button 
+          type="submit" 
+          disabled={isLoading || !form.full_name || !form.phone}
+        >
+          {customer ? "Update" : "Create"} Customer
+        </Button>
       </div>
     </form>
   );

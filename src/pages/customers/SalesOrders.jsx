@@ -9,6 +9,7 @@ import { Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import SalesOrderForm from "../../components/customers/SalesOrderForm";
 import { format } from "date-fns";
+import { toast } from "sonner";
 
 export default function SalesOrders() {
   const [showForm, setShowForm] = useState(false);
@@ -22,12 +23,14 @@ export default function SalesOrders() {
 
   const createMutation = useMutation({
     mutationFn: (data) => apiClient.entities.SalesOrder.create(data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["salesOrders"] }); setShowForm(false); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["salesOrders"] }); setShowForm(false); toast.success("Sales order created."); },
+    onError: (error) => { toast.error(error.message || "Failed to create sales order."); }
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => apiClient.entities.SalesOrder.update(id, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["salesOrders"] }); setShowForm(false); setEditing(null); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["salesOrders"] }); setShowForm(false); setEditing(null); toast.success("Sales order updated."); },
+    onError: (error) => { toast.error(error.message || "Failed to update sales order."); }
   });
 
   const columns = [

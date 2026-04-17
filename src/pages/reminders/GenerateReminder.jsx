@@ -51,9 +51,11 @@ export default function GenerateReminder() {
       const reminder = await apiClient.entities.PaymentReminder.create(data);
 
       let builderNoc = null;
+      let bankRequestLetter = null;
       if (data.has_active_loan_snapshot) {
+        const timestamp = Date.now().toString(36).toUpperCase();
         builderNoc = await apiClient.entities.BankDocument.create({
-          document_number: "BD" + Date.now().toString(36).toUpperCase(),
+          document_number: "BD" + timestamp,
           customer_id: data.customer_id,
           customer_name: data.customer_name,
           customer_code: data.customer_code,
@@ -76,20 +78,47 @@ export default function GenerateReminder() {
           remarks: `Auto-generated with Reminder ${data.reminder_number}`,
         });
 
+        bankRequestLetter = await apiClient.entities.BankDocument.create({
+          document_number: "BRL" + timestamp,
+          customer_id: data.customer_id,
+          customer_name: data.customer_name,
+          customer_code: data.customer_code,
+          sales_order_id: data.sales_order_id,
+          project_name: data.project_name,
+          unit_number: data.unit_number,
+          document_type: "bank_request_letter",
+          bank_name: selectedCustomer?.loan_bank_name || "",
+          loan_account_number: selectedCustomer?.loan_account_number || "",
+          agreement_value: Number(data.agreement_value || 0),
+          amount_received_to_date: Number(data.amount_received_to_date || 0),
+          outstanding_amount: Number(data.outstanding_amount || 0),
+          noc_purpose: "loan",
+          authorized_signatory: "Authorized Signatory",
+          generation_date: data.reminder_date,
+          status: "draft",
+          triggered_by: "auto_payment_reminder",
+          generated_by: "System",
+          transaction_reference: data.transaction_reference,
+          remarks: `Auto-generated Bank Request Letter with Reminder ${data.reminder_number}`,
+        });
+
         await apiClient.entities.PaymentReminder.update(reminder.id, {
           linked_builder_noc_id: builderNoc.id,
-          linked_documents: "Builder NOC",
+          linked_documents: "Builder NOC, Bank Request Letter",
         });
       }
 
-      return { reminder, builderNoc };
+      return { reminder, builderNoc, bankRequestLetter };
     },
-    onSuccess: ({ reminder, builderNoc }) => {
+    onSuccess: ({ reminder, builderNoc, bankRequestLetter }) => {
       queryClient.invalidateQueries({ queryKey: ["paymentReminders"] });
       queryClient.invalidateQueries({ queryKey: ["bankDocuments"] });
-      setConfirmation({ createdReminder: reminder, builderNocId: builderNoc?.id || null });
+      setConfirmation({ createdReminder: reminder, builderNocId: builderNoc?.id || null, bankRequestLetterId: bankRequestLetter?.id || null });
       setStep(4);
-      toast.success("Reminder generated successfully");
+      toast.success("Reminder and required documents generated successfully");
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to generate payment reminder.");
     }
   });
 

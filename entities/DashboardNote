@@ -1,0 +1,32 @@
+{
+  "name": "DashboardNote",
+  "type": "object",
+  "properties": {
+    "content": {
+      "type": "string",
+      "description": "Content of the quick note"
+    },
+    "author": {
+      "type": "string",
+      "description": "Name of the person who created the note"
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "default": "medium",
+      "description": "Priority level of the note"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp of creation"
+    }
+  },
+  "required": [
+    "content"
+  ]
+}

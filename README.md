@@ -1,42 +1,70 @@
-**Welcome to your Base44 project** 
+## PropFin Local PostgreSQL Setup
 
-**About**
+This project now persists frontend data to a local PostgreSQL database through a local Node API.
 
-View and Edit  your app on [Base44.com](http://Base44.com) 
+### 1) Create database in pgAdmin
 
-This project contains everything you need to run your app locally.
+1. Open pgAdmin.
+2. Create a new database named `propfin_app`.
+3. Use any local postgres user with create/read/write access to this database.
 
-**Edit the code in your local development environment**
+### 2) Configure environment
 
-Any change pushed to the repo will also be reflected in the Base44 Builder.
+Create a `.env` file in the project root:
 
-**Prerequisites:** 
-
-1. Clone the repository using the project's Git URL 
-2. Navigate to the project directory
-3. Install dependencies: `npm install`
-4. Create an `.env.local` file and set the right environment variables
-
-```
-VITE_BASE44_APP_ID=your_app_id
-VITE_BASE44_APP_BASE_URL=your_backend_url
-
-e.g.
-VITE_BASE44_APP_ID=cbef744a8545c389ef439ea6
-VITE_BASE44_APP_BASE_URL=https://my-to-do-list-81bfaad7.base44.app
+```bash
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/propfin_app
+API_PORT=4000
+CORS_ORIGIN=http://localhost:5173
 ```
 
-Run the app: `npm run dev`
+Update username/password/port as per your local PostgreSQL setup.
 
-**Publish your changes**
+### 3) Install dependencies
 
-Open [Base44.com](http://Base44.com) and click on Publish.
+```bash
+npm install
+```
 
-**Docs & Support**
+Generate Prisma client:
 
-Documentation: [https://docs.base44.com/Integrations/Using-GitHub](https://docs.base44.com/Integrations/Using-GitHub)
+```bash
+npm run db:generate
+```
 
-Support: [https://app.base44.com/support](https://app.base44.com/support)
+### 4) Start backend and frontend
+
+Run these in two terminals:
+
+```bash
+npm run server
+```
+
+```bash
+npm run dev
+```
+
+Frontend calls `/api/*`, and Vite proxies those calls to `http://localhost:4000`.
+All entity records submitted from the UI are stored in PostgreSQL table `app_entity_records`.
+
+If you want to provision the full domain schema from this repo, run:
+
+```bash
+npm run db:deploy
+```
+
+### 5) Verify persistence
+
+In pgAdmin Query Tool:
+
+```sql
+SELECT entity_name, id, data, created_at
+FROM app_entity_records
+ORDER BY created_at DESC
+LIMIT 50;
+```
+
+You should see rows appear after creating/updating data from frontend forms.
 
 ## Database Schema (PostgreSQL)
 

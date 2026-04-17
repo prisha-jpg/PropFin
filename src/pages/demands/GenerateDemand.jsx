@@ -37,11 +37,22 @@ export default function GenerateDemand() {
       queryClient.invalidateQueries({ queryKey: ["demandLetters"] });
       toast.success("Demand letter generated");
       navigate("/demand-letters");
-    }
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to generate demand letter.");
+    },
   });
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (!form.sales_order_id) {
+      toast.error("Please select a sales order.");
+      return;
+    }
+    if (!form.due_date || !form.demand_amount) {
+      toast.error("Due date and demand amount are required.");
+      return;
+    }
     const demandAmt = Number(form.demand_amount);
     const gst = Number(form.gst_amount || 0);
     mutation.mutate({

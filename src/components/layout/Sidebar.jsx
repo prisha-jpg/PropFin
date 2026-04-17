@@ -5,7 +5,7 @@ import {
   Users, FileText, CreditCard, BarChart3, ArrowRightLeft,
   XCircle, DollarSign, Repeat, Tag, Building2, Receipt,
   Mail, Percent, Settings, TrendingUp, ChevronDown, ChevronRight,
-  LayoutDashboard, Menu, X, FileCheck, Landmark, Calculator
+  LayoutDashboard, Menu, X, FileCheck, Landmark, Calculator, CircleDollarSign
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -129,6 +129,15 @@ const menuGroups = [
       { label: "Agreement Details", path: "/agreements", icon: FileText },
       { label: "Interest Waiver", path: "/waiver/request", icon: Percent },
       { label: "Waiver Types", path: "/waiver/types", icon: Settings }
+    ]
+  },
+  {
+    label: "Pre-Sales",
+    icon: Calculator,
+    items: [
+      { label: "Master Price List", path: "/master-price-list", icon: CircleDollarSign },
+      { label: "Payment Schedule Master", path: "/payment-schedule-master", icon: Percent },
+      { label: "Unit Quotation", path: "/price-sheet", icon: Calculator }
     ]
   },
   {

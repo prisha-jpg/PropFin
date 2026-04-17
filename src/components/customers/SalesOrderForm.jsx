@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
 
 export default function SalesOrderForm({ order, onSubmit, onCancel, isLoading }) {
   const { data: customers = [] } = useQuery({
@@ -40,7 +41,18 @@ export default function SalesOrderForm({ order, onSubmit, onCancel, isLoading })
   };
 
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ ...form, total_value: Number(form.total_value), outstanding_amount: Number(form.outstanding_amount || form.total_value) }); }} className="space-y-4">
+    <form onSubmit={e => {
+      e.preventDefault();
+      if (!form.customer_id) {
+        toast.error("Please select a customer.");
+        return;
+      }
+      if (!form.project_name || !form.unit_number || !form.total_value) {
+        toast.error("Please fill all required sales order fields.");
+        return;
+      }
+      onSubmit({ ...form, total_value: Number(form.total_value), outstanding_amount: Number(form.outstanding_amount || form.total_value) });
+    }} className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label>Customer *</Label>
@@ -113,7 +125,7 @@ export default function SalesOrderForm({ order, onSubmit, onCancel, isLoading })
       </div>
       <div className="flex justify-end gap-3 pt-2">
         <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button type="submit" disabled={isLoading}>{order ? "Update" : "Create"} Order</Button>
+        <Button type="submit" disabled={isLoading || !form.customer_id || !form.project_name || !form.unit_number || !form.total_value}>{order ? "Update" : "Create"} Order</Button>
       </div>
     </form>
   );

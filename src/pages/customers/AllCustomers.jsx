@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import CustomerForm from "../../components/customers/CustomerForm";
+import { toast } from "sonner";
 
 export default function AllCustomers() {
   const [showForm, setShowForm] = useState(false);
@@ -20,13 +21,56 @@ export default function AllCustomers() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data) => apiClient.entities.Customer.create(data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["customers"] }); setShowForm(false); }
+    mutationFn: async (data) => {
+      console.log("[AllCustomers] Initiating createMutation with data:", data);
+      const startTime = Date.now();
+      try {
+        const response = await apiClient.entities.Customer.create(data);
+        const duration = Date.now() - startTime;
+        console.log(`[AllCustomers] createMutation SUCCESS (${duration}ms):`, response);
+        return response;
+      } catch (error) {
+        const duration = Date.now() - startTime;
+        console.error(`[AllCustomers] createMutation FAILED (${duration}ms):`, error);
+        throw error;
+      }
+    },
+    onSuccess: () => {
+      console.log("[AllCustomers] createMutation onSuccess triggered. Invalidating queries...");
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      setShowForm(false);
+      toast.success("Customer created successfully.");
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to create customer.");
+    }
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }) => apiClient.entities.Customer.update(id, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["customers"] }); setShowForm(false); setEditing(null); }
+    mutationFn: async ({ id, data }) => {
+      console.log(`[AllCustomers] Initiating updateMutation for ID ${id} with data:`, data);
+      const startTime = Date.now();
+      try {
+        const response = await apiClient.entities.Customer.update(id, data);
+        const duration = Date.now() - startTime;
+        console.log(`[AllCustomers] updateMutation SUCCESS (${duration}ms):`, response);
+        return response;
+      } catch (error) {
+        const duration = Date.now() - startTime;
+        console.error(`[AllCustomers] updateMutation FAILED (${duration}ms):`, error);
+        throw error;
+      }
+    },
+    onSuccess: () => {
+      console.log("[AllCustomers] updateMutation onSuccess triggered. Invalidating queries...");
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      setShowForm(false);
+      setEditing(null);
+      toast.success("Customer updated successfully.");
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to update customer.");
+    }
   });
 
   const columns = [

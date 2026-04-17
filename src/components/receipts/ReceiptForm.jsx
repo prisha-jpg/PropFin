@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "sonner";
 
 export default function ReceiptForm({ onSubmit, onCancel, isLoading }) {
   const { data: orders = [] } = useQuery({ queryKey: ["salesOrders"], queryFn: () => apiClient.entities.SalesOrder.list("-created_date", 200) });
@@ -24,7 +25,18 @@ export default function ReceiptForm({ onSubmit, onCancel, isLoading }) {
   };
 
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ ...form, amount: Number(form.amount), status: "received" }); }} className="space-y-4">
+    <form onSubmit={e => {
+      e.preventDefault();
+      if (!form.sales_order_id) {
+        toast.error("Please select a sales order.");
+        return;
+      }
+      if (!form.amount || !form.payment_mode) {
+        toast.error("Amount and payment mode are required.");
+        return;
+      }
+      onSubmit({ ...form, amount: Number(form.amount), status: "received" });
+    }} className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label>Sales Order *</Label>
@@ -74,7 +86,7 @@ export default function ReceiptForm({ onSubmit, onCancel, isLoading }) {
       </div>
       <div className="flex justify-end gap-3 pt-2">
         <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button type="submit" disabled={isLoading}>Record Payment</Button>
+        <Button type="submit" disabled={isLoading || !form.sales_order_id || !form.amount || !form.payment_mode}>Record Payment</Button>
       </div>
     </form>
   );

@@ -9,6 +9,7 @@ import { Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ReceiptForm from "../../components/receipts/ReceiptForm";
 import { format } from "date-fns";
+import { toast } from "sonner";
 
 export default function PaymentJournal() {
   const [showForm, setShowForm] = useState(false);
@@ -21,7 +22,8 @@ export default function PaymentJournal() {
 
   const mutation = useMutation({
     mutationFn: (data) => apiClient.entities.PaymentReceipt.create(data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["receipts"] }); setShowForm(false); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["receipts"] }); setShowForm(false); toast.success("Payment receipt recorded."); },
+    onError: (error) => { toast.error(error.message || "Failed to record payment."); }
   });
 
   const columns = [

@@ -52,6 +52,9 @@ export default function GenerateBankDoc() {
       downloadDocumentPdf(created);
       toast.success(`${formatDocumentType(created.document_type)} generated and downloaded`);
       navigate("/bank-documents/inquiry");
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to generate bank document.");
     }
   });
 

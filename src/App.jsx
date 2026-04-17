@@ -44,6 +44,9 @@ import DocumentChecklistPage from "@/pages/setup/DocumentChecklist";
 import ProjectDemandNumbers from "@/pages/setup/ProjectDemandNumbers";
 import BankMasterPage from "@/pages/setup/BankMasterPage";
 import TDSAccountPage from "@/pages/setup/TDSAccountPage";
+import MasterPriceList from "@/pages/setup/MasterPriceList";
+import PaymentScheduleMaster from "@/pages/setup/PaymentScheduleMaster";
+import PriceSheet from "@/pages/setup/PriceSheet";
 
 function AuthenticatedApp() {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -73,6 +76,9 @@ function AuthenticatedApp() {
     <Routes>
       <Route element={<AppLayout />}>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/master-price-list" element={<MasterPriceList />} />
+        <Route path="/payment-schedule-master" element={<PaymentScheduleMaster />} />
+        <Route path="/price-sheet" element={<PriceSheet />} />
         <Route path="/customers" element={<AllCustomers />} />
         <Route path="/bookings" element={<Bookings />} />
         <Route path="/sales-orders" element={<SalesOrders />} />

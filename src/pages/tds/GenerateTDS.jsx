@@ -13,7 +13,8 @@ export default function GenerateTDS() {
 
   const mutation = useMutation({
     mutationFn: (data) => apiClient.entities.ClientTDS.create(data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["clientTDS"] }); toast.success("TDS entry generated"); navigate("/tds/view"); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["clientTDS"] }); toast.success("TDS entry generated"); navigate("/tds/view"); },
+    onError: (error) => { toast.error(error.message || "Failed to generate TDS entry."); }
   });
 
   const fields = [
