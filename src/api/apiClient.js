@@ -1,5 +1,7 @@
 import { appParams } from "@/lib/app-params";
 
+// This automatically prepends "/api" to all requests, so our components 
+// only need to pass the specific route (e.g., "/pricing/calculate-unit")
 const basePath = "/api";
 
 const request = async (path, options = {}) => {
