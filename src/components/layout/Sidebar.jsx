@@ -26,6 +26,14 @@ const menuGroups = [
     ]
   },
   {
+    label: "Presales",
+    icon: Calculator,
+    items: [
+      // FIXED: Properly structured as an item within a group
+      { label: "Presales Configurator", path: "/presales-hub", icon: Calculator }
+    ]
+  },
+  {
     label: "Demand Letters",
     icon: FileText,
     items: [
@@ -129,15 +137,6 @@ const menuGroups = [
       { label: "Agreement Details", path: "/agreements", icon: FileText },
       { label: "Interest Waiver", path: "/waiver/request", icon: Percent },
       { label: "Waiver Types", path: "/waiver/types", icon: Settings }
-    ]
-  },
-  {
-    label: "Pre-Sales",
-    icon: Calculator,
-    items: [
-      { label: "Master Price List", path: "/master-price-list", icon: CircleDollarSign },
-      { label: "Payment Schedule Master", path: "/payment-schedule-master", icon: Percent },
-      { label: "Unit Quotation", path: "/price-sheet", icon: Calculator }
     ]
   },
   {

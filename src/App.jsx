@@ -8,6 +8,7 @@ import UserNotRegisteredError from "@/components/UserNotRegisteredError";
 
 import AppLayout from "@/components/layout/AppLayout";
 
+// Core Pages
 import Dashboard from "@/pages/Dashboard";
 import AllCustomers from "@/pages/customers/AllCustomers";
 import Bookings from "@/pages/customers/Bookings";
@@ -15,11 +16,18 @@ import SalesOrders from "@/pages/customers/SalesOrders";
 import DemandLetters from "@/pages/demands/DemandLetters";
 import GenerateDemand from "@/pages/demands/GenerateDemand";
 import PaymentJournal from "@/pages/receipts/PaymentJournal";
+
+// The New Unified Presales Hub
+import PresalesHub from "@/pages/presales/PresalesHub";
+
+// Reports
 import LedgerReport from "@/pages/reports/LedgerReport";
 import InterestReport from "@/pages/reports/InterestReport";
 import SalesReceiptReport from "@/pages/reports/SalesReceiptReport";
 import OutstandingReport from "@/pages/reports/OutstandingReport";
 import ProvisionalStatement from "@/pages/reports/ProvisionalStatement";
+
+// Workflows
 import HandoverGenerate from "@/pages/workflows/HandoverGenerate";
 import HandoverApproved from "@/pages/workflows/HandoverApproved";
 import CancellationRequestPage from "@/pages/workflows/CancellationRequest";
@@ -27,6 +35,8 @@ import CancellationApproved from "@/pages/workflows/CancellationApproved";
 import RefundRequestPage from "@/pages/workflows/RefundRequest";
 import ShiftingRequestPage from "@/pages/workflows/ShiftingRequest";
 import ResaleRequestPage from "@/pages/workflows/ResaleRequest";
+
+// Setup & Compliance
 import GenerateBankDoc from "@/pages/bank/GenerateBankDoc";
 import BankDocInquiry from "@/pages/bank/BankDocInquiry";
 import GenerateTDS from "@/pages/tds/GenerateTDS";
@@ -44,9 +54,6 @@ import DocumentChecklistPage from "@/pages/setup/DocumentChecklist";
 import ProjectDemandNumbers from "@/pages/setup/ProjectDemandNumbers";
 import BankMasterPage from "@/pages/setup/BankMasterPage";
 import TDSAccountPage from "@/pages/setup/TDSAccountPage";
-import MasterPriceList from "@/pages/setup/MasterPriceList";
-import PaymentScheduleMaster from "@/pages/setup/PaymentScheduleMaster";
-import PriceSheet from "@/pages/setup/PriceSheet";
 
 function AuthenticatedApp() {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -76,20 +83,28 @@ function AuthenticatedApp() {
     <Routes>
       <Route element={<AppLayout />}>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/master-price-list" element={<MasterPriceList />} />
-        <Route path="/payment-schedule-master" element={<PaymentScheduleMaster />} />
-        <Route path="/price-sheet" element={<PriceSheet />} />
+        
+        {/* NEW UNIFIED PRESALES ROUTE */}
+        <Route path="/presales-hub" element={<PresalesHub />} />
+        
+        {/* Customers & Sales */}
         <Route path="/customers" element={<AllCustomers />} />
         <Route path="/bookings" element={<Bookings />} />
         <Route path="/sales-orders" element={<SalesOrders />} />
+        
+        {/* Financials */}
         <Route path="/demand-letters" element={<DemandLetters />} />
         <Route path="/demand-letters/generate" element={<GenerateDemand />} />
         <Route path="/receipts" element={<PaymentJournal />} />
+        
+        {/* Reports */}
         <Route path="/reports/ledger" element={<LedgerReport />} />
         <Route path="/reports/interest" element={<InterestReport />} />
         <Route path="/reports/sales-receipt" element={<SalesReceiptReport />} />
         <Route path="/reports/outstanding" element={<OutstandingReport />} />
         <Route path="/reports/provisional" element={<ProvisionalStatement />} />
+        
+        {/* Workflows */}
         <Route path="/handover/generate" element={<HandoverGenerate />} />
         <Route path="/handover/approved" element={<HandoverApproved />} />
         <Route path="/cancellation/request" element={<CancellationRequestPage />} />
@@ -97,16 +112,22 @@ function AuthenticatedApp() {
         <Route path="/refund" element={<RefundRequestPage />} />
         <Route path="/shifting" element={<ShiftingRequestPage />} />
         <Route path="/resale" element={<ResaleRequestPage />} />
+        
+        {/* Compliance & Banking */}
         <Route path="/bank-documents/generate" element={<GenerateBankDoc />} />
         <Route path="/bank-documents/inquiry" element={<BankDocInquiry />} />
         <Route path="/tds/generate" element={<GenerateTDS />} />
         <Route path="/tds/view" element={<ViewTDS />} />
+        
+        {/* Reminders & Interest */}
         <Route path="/reminders/generate" element={<GenerateReminder />} />
         <Route path="/reminders/inquiry" element={<ReminderInquiry />} />
         <Route path="/interest/settlement" element={<InterestSettlement />} />
         <Route path="/interest/calculation" element={<InterestCalculation />} />
         <Route path="/interest/summary" element={<InterestSummary />} />
         <Route path="/interest/fpv" element={<FPVCalculation />} />
+        
+        {/* Setup & Others */}
         <Route path="/agreements" element={<Agreements />} />
         <Route path="/waiver/request" element={<WaiverRequestPage />} />
         <Route path="/waiver/types" element={<WaiverTypes />} />
