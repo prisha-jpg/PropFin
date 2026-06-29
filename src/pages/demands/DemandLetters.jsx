@@ -7,7 +7,7 @@ import StatusBadge from "../../components/shared/StatusBadge";
 import { format } from "date-fns";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { Plus, Download } from "lucide-react";
 
 export default function DemandLetters() {
   const { data: demands = [], isLoading } = useQuery({
@@ -25,7 +25,21 @@ export default function DemandLetters() {
     { header: "Demand Amt", accessor: "total_demand", cell: r => `₹${(r.total_demand || r.demand_amount || 0).toLocaleString()}` },
     { header: "Due Date", accessor: "due_date", cell: r => r.due_date ? format(new Date(r.due_date), "dd MMM yyyy") : "—" },
     { header: "Balance", accessor: "balance", cell: r => <span className="text-red-600 font-medium">₹{(r.balance || 0).toLocaleString()}</span> },
-    { header: "Status", accessor: "status", cell: r => <StatusBadge status={r.status} /> }
+    { header: "Status", accessor: "status", cell: r => <StatusBadge status={r.status} /> },
+    {
+      header: "Actions",
+      accessor: "id",
+      cell: r => (
+        <a
+          href={`/api/documents/demand-letter/${r.id}/download`}
+          download
+          className="inline-flex items-center justify-center rounded-md p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-200/50 transition-colors"
+          title="Download PDF"
+        >
+          <Download className="w-4 h-4" />
+        </a>
+      )
+    }
   ];
 
   return (

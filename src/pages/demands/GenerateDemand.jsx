@@ -19,15 +19,44 @@ export default function GenerateDemand() {
   const [form, setForm] = useState({
     sales_order_id: "", customer_id: "", customer_name: "", project_name: "", unit_number: "",
     demand_type: "subsequent", demand_date: new Date().toISOString().split("T")[0], due_date: "",
-    installment_number: "", milestone_description: "", demand_amount: "", gst_amount: ""
+    installment_number: "", milestone_description: "", demand_amount: "", gst_amount: "",
+    payment_schedule_id: ""
   });
+
+  const selectedOrder = orders.find(o => o.id === form.sales_order_id);
+  const selectedOrderSchedules = selectedOrder?.payment_schedules || [];
+  const demandedIds = new Set((selectedOrder?.demand_letters || []).map(d => d.payment_schedule_id).filter(Boolean));
 
   const h = (f, v) => setForm(p => ({ ...p, [f]: v }));
 
   const handleOrderChange = (id) => {
     const o = orders.find(o => o.id === id);
     if (o) {
-      setForm(p => ({ ...p, sales_order_id: id, customer_id: o.customer_id, customer_name: o.customer_name, project_name: o.project_name, unit_number: o.unit_number }));
+      const demandedScheduleIds = new Set(
+        (o.demand_letters || [])
+          .map(d => d.payment_schedule_id)
+          .filter(Boolean)
+      );
+      
+      const nextMilestone = (o.payment_schedules || []).find(
+        s => !demandedScheduleIds.has(s.id)
+      );
+
+      setForm({
+        sales_order_id: id,
+        customer_id: o.customer_id,
+        customer_name: o.customer_name,
+        project_name: o.project_name,
+        unit_number: o.unit_number,
+        demand_type: "subsequent",
+        demand_date: new Date().toISOString().split("T")[0],
+        due_date: "",
+        installment_number: nextMilestone ? String(nextMilestone.display_order) : "",
+        milestone_description: nextMilestone ? nextMilestone.milestone_name : "",
+        demand_amount: nextMilestone ? String(nextMilestone.due_amount) : "",
+        gst_amount: nextMilestone ? String(Number(nextMilestone.due_amount) * 0.05) : "",
+        payment_schedule_id: nextMilestone ? nextMilestone.id : ""
+      });
     }
   };
 
@@ -64,7 +93,8 @@ export default function GenerateDemand() {
       balance: demandAmt + gst,
       amount_paid: 0,
       installment_number: Number(form.installment_number),
-      status: "generated"
+      status: "generated",
+      payment_schedule_id: form.payment_schedule_id || null
     });
   };
 
@@ -88,6 +118,51 @@ export default function GenerateDemand() {
                 <Label>Customer</Label>
                 <Input value={form.customer_name} readOnly className="bg-muted" />
               </div>
+
+              {selectedOrder && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label>Select Installment Milestone</Label>
+                    <Select
+                      value={form.payment_schedule_id}
+                      onValueChange={(scheduleId) => {
+                        const ms = selectedOrderSchedules.find(s => s.id === scheduleId);
+                        if (ms) {
+                          setForm(p => ({
+                            ...p,
+                            payment_schedule_id: ms.id,
+                            installment_number: String(ms.display_order),
+                            milestone_description: ms.milestone_name,
+                            demand_amount: String(ms.due_amount),
+                            gst_amount: String(Number(ms.due_amount) * 0.05)
+                          }));
+                        }
+                      }}
+                    >
+                      <SelectTrigger><SelectValue placeholder="Choose milestone" /></SelectTrigger>
+                      <SelectContent>
+                        {selectedOrderSchedules.map(s => {
+                          const isDemanded = demandedIds.has(s.id);
+                          return (
+                            <SelectItem key={s.id} value={s.id}>
+                              {s.display_order}. {s.milestone_name} (₹{Number(s.due_amount).toLocaleString()}){isDemanded ? " [Demanded]" : ""}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Current Outstanding</Label>
+                    <Input
+                      value={selectedOrder ? `₹${Number(selectedOrder.outstanding_amount || 0).toLocaleString()}` : "—"}
+                      readOnly
+                      className="bg-muted font-semibold text-red-600"
+                    />
+                  </div>
+                </>
+              )}
+
               <div className="space-y-1.5">
                 <Label>Demand Type</Label>
                 <Select value={form.demand_type} onValueChange={v => h("demand_type", v)}>

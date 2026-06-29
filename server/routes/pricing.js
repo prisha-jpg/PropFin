@@ -1,5 +1,7 @@
 import express from "express";
 import { PrismaClient } from "@prisma/client";
+import { calculateUnitPricing } from "../../src/lib/unitPricing.js";
+import { postDelayedInterestToLedger, syncHistoricalInterest } from "../utils/interestCalculator.js";
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -9,30 +11,115 @@ const prisma = new PrismaClient();
 // ==========================================
 router.post("/calculate-unit", async (req, res) => {
   try {
-    const { carpet_area, sba, rate_per_sqft, maintenance_deposit = 300000, caic_charges = 0 } = req.body;
-
-    // Based on the PL.xlsx logic:
-    // Basic Sale Value (BSV) = SBA * Rate per sqft (Note: PL.xlsx sometimes adds PLC or parking, we'll keep it standard here)
-    const basic_sale_value = Number(sba) * Number(rate_per_sqft);
-    
-    // GST is 5% on Basic Sale Value
-    const gst_amount = basic_sale_value * 0.05;
-    
-    // Total Value Calculation
-    const total_value = basic_sale_value + gst_amount + Number(maintenance_deposit) + Number(caic_charges);
-
-    res.json({
-      success: true,
-      data: {
-        basic_sale_value: basic_sale_value.toFixed(2),
-        gst_amount: gst_amount.toFixed(2),
-        maintenance_deposit: Number(maintenance_deposit).toFixed(2),
-        caic_charges: Number(caic_charges).toFixed(2),
-        total_sale_value: total_value.toFixed(2)
-      }
-    });
+    const data = calculateUnitPricing(req.body);
+    res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ==========================================
+// MASTER PRICE LIST
+// ==========================================
+router.get("/master", async (_req, res) => {
+  try {
+    const units = await prisma.units.findMany({
+      include: {
+        unitPricing: true,
+        projects: true,
+        blocks: true,
+      },
+      orderBy: { unit_number: "asc" },
+    });
+    res.json(units);
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.get("/unit/:unitId", async (req, res) => {
+  try {
+    const unit = await prisma.units.findUnique({
+      where: { id: req.params.unitId },
+      include: {
+        unitPricing: true,
+        projects: true,
+        blocks: true,
+      },
+    });
+
+    if (!unit) {
+      return res.status(404).json({ success: false, message: "Unit not found" });
+    }
+
+    res.json(unit);
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post("/master", async (req, res) => {
+  try {
+    const { prices } = req.body;
+    if (!Array.isArray(prices)) {
+      return res.status(400).json({ error: "prices array is required" });
+    }
+
+    await prisma.$transaction(
+      prices.flatMap((p) => {
+        const ops = [];
+
+        if (p.unit_id) {
+          const unitUpdate = {};
+          if (p.sba != null) unitUpdate.super_built_up_area = Number(p.sba);
+          if (p.unit_type) unitUpdate.unit_type = p.unit_type;
+          if (p.floor_number != null && p.floor_number !== "") {
+            unitUpdate.floor_number = Number(p.floor_number);
+          }
+
+          if (Object.keys(unitUpdate).length > 0) {
+            ops.push(
+              prisma.units.update({
+                where: { id: p.unit_id },
+                data: unitUpdate,
+              }),
+            );
+          }
+
+          ops.push(
+            prisma.unit_pricing.upsert({
+              where: { unit_id: p.unit_id },
+              create: {
+                unit_id: p.unit_id,
+                classification: p.classification || null,
+                rate_per_sqft: Number(p.rate_per_sqft) || 0,
+                caic_charges: Number(p.caic_charges) || 0,
+                maintenance_deposit: Number(p.maintenance_deposit) || 0,
+                gst_rate: Number(p.gst_rate ?? 5),
+                basic_sale_value: Number(p.basic_sale_value) || 0,
+                total_sale_value: Number(p.total_sale_value) || 0,
+              },
+              update: {
+                classification: p.classification || null,
+                rate_per_sqft: Number(p.rate_per_sqft) || 0,
+                caic_charges: Number(p.caic_charges) || 0,
+                maintenance_deposit: Number(p.maintenance_deposit) || 0,
+                gst_rate: Number(p.gst_rate ?? 5),
+                basic_sale_value: Number(p.basic_sale_value) || 0,
+                total_sale_value: Number(p.total_sale_value) || 0,
+              },
+            }),
+          );
+        }
+
+        return ops;
+      }),
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Master price list save error:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -111,13 +198,24 @@ router.post("/generate-schedule", async (req, res) => {
 // ==========================================
 router.post("/calculate-interest", async (req, res) => {
   try {
-    const { sales_order_id, annual_interest_rate = 0.18, calculation_date = new Date() } = req.body;
+    const { sales_order_id, annual_interest_rate = 0.18, calculation_date = new Date(), isFinalSettlement = false, is_final_settlement = false } = req.body;
 
     if (!sales_order_id) {
       return res.status(400).json({ success: false, message: "Missing sales_order_id" });
     }
 
-    // 1. Fetch all Schedules and Receipts for this Order
+    const finalSettlementBypass = isFinalSettlement === true || is_final_settlement === true;
+
+    // Query sales order to get customer_id
+    const salesOrder = await prisma.sales_orders.findUnique({
+      where: { id: sales_order_id }
+    });
+    if (!salesOrder) {
+      return res.status(404).json({ success: false, message: "Sales order not found" });
+    }
+    const customerId = salesOrder.customer_id;
+
+    // 1. Fetch all Schedules, Receipts and PRL Demands for this Order
     const schedules = await prisma.payment_schedules.findMany({
       where: { sales_order_id },
       orderBy: { original_due_date: 'asc' }
@@ -128,18 +226,25 @@ router.post("/calculate-interest", async (req, res) => {
       orderBy: { consideration_date: 'asc' }
     });
 
-    // 2. The Engine: Calculate Overdue Interest (FIFO Method)
-    let totalInterest = 0;
+    const prlDemands = await prisma.demand_letters.findMany({
+      where: {
+        sales_order_id,
+        demand_type: 'subsequent_prl',
+        status: { notIn: ['paid', 'cancelled'] }
+      },
+      orderBy: { due_date: 'asc' }
+    });
+
     const calcDate = new Date(calculation_date);
-    const breakdown = [];
+    const allLedgerEntries = [];
 
-    // Helper to calculate days between dates
-    const getDaysDiff = (start, end) => {
-      const diffTime = Math.abs(end - start);
-      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    };
+    // Normalize rate: if passed as decimal (e.g. 0.18), convert to percentage (18)
+    let rate = Number(annual_interest_rate);
+    if (rate <= 1) {
+      rate = rate * 100;
+    }
 
-    // Calculate per milestone
+    // Calculate per milestone using the external month-by-month calculator utility
     for (const schedule of schedules) {
       if (!schedule.original_due_date || schedule.status === 'paid') continue;
       
@@ -159,34 +264,66 @@ router.post("/calculate-interest", async (req, res) => {
       // If they paid on or before the due date, no interest
       if (endDate <= dueDate) continue;
 
-      const daysOverdue = getDaysDiff(dueDate, endDate);
-      const principal = Number(schedule.due_amount);
-      
-      // Math: (Principal * Rate * Days) / 365
-      const interestAmount = (principal * Number(annual_interest_rate) * daysOverdue) / 365;
-      const gstOnInterest = interestAmount * 0.18; // 18% GST on Interest
-
-      totalInterest += (interestAmount + gstOnInterest);
-
-      breakdown.push({
-        milestone: schedule.milestone_name,
-        principal: principal.toFixed(2),
-        due_date: dueDate.toISOString().split('T')[0],
-        paid_date: matchedReceipt ? endDate.toISOString().split('T')[0] : 'Unpaid',
-        days_overdue: daysOverdue,
-        interest_amount: interestAmount.toFixed(2),
-        gst_on_interest: gstOnInterest.toFixed(2),
-        total_penalty: (interestAmount + gstOnInterest).toFixed(2)
+      const result = await postDelayedInterestToLedger(prisma, {
+        salesOrderId: sales_order_id,
+        customerId: customerId,
+        milestoneDemand: Number(schedule.due_amount),
+        amountPaid: 0,
+        dueDate: dueDate,
+        calculationEndDate: endDate,
+        annual_interest_rate: rate,
+        milestoneName: schedule.milestone_name,
+        isFinalSettlement: finalSettlementBypass
       });
+
+      if (result && result.ledgerEntries) {
+        allLedgerEntries.push(...result.ledgerEntries);
+      }
+    }
+
+    // Calculate interest for outstanding PRL Demands
+    for (const demand of prlDemands) {
+      if (!demand.due_date) continue;
+
+      const dueDate = new Date(demand.due_date);
+
+      // If the due date hasn't passed yet, no interest
+      if (dueDate >= calcDate) continue;
+
+      // Find if any receipt paid for this specific demand schedule
+      const matchedReceipt = demand.payment_schedule_id
+        ? receipts.find(r => r.payment_schedule_id === demand.payment_schedule_id)
+        : null;
+
+      const endDate = matchedReceipt && matchedReceipt.consideration_date
+        ? new Date(matchedReceipt.consideration_date)
+        : calcDate;
+
+      // If they paid on or before the due date, no interest
+      if (endDate <= dueDate) continue;
+
+      const result = await postDelayedInterestToLedger(prisma, {
+        salesOrderId: sales_order_id,
+        customerId: customerId,
+        milestoneDemand: Number(demand.principal_amount),
+        amountPaid: 0,
+        dueDate: dueDate,
+        calculationEndDate: endDate,
+        annual_interest_rate: rate,
+        milestoneName: `PRL Demand - ${demand.demand_number}`,
+        isFinalSettlement: finalSettlementBypass
+      });
+
+      if (result && result.ledgerEntries) {
+        allLedgerEntries.push(...result.ledgerEntries);
+      }
     }
 
     res.json({
       success: true,
+      ledger_entries: allLedgerEntries,
       data: {
-        total_interest_due: totalInterest.toFixed(2),
-        annual_rate: `${(annual_interest_rate * 100)}%`,
-        calculation_date: calcDate.toISOString().split('T')[0],
-        breakdown: breakdown
+        ledger_entries: allLedgerEntries
       }
     });
 
@@ -195,4 +332,40 @@ router.post("/calculate-interest", async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
+// ==========================================
+// 4. JIT HISTORICAL INTEREST SYNCHRONIZATION LEDGER RETRIEVAL
+// ==========================================
+router.get("/ledger/:customerId", async (req, res) => {
+  try {
+    const { customerId } = req.params;
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(customerId)) {
+      return res.status(400).json({ success: false, message: "Invalid customer ID format" });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const customers = await tx.$queryRaw`
+        SELECT id FROM customers WHERE id = ${customerId}::uuid FOR UPDATE
+      `;
+      if (!customers || customers.length === 0) {
+        throw new Error("Customer not found");
+      }
+
+      await syncHistoricalInterest(customerId, tx);
+    });
+
+    const ledger = await prisma.ledger.findMany({
+      where: { customer_id: customerId },
+      orderBy: { reference_date: "asc" }
+    });
+
+    res.json(ledger);
+  } catch (error) {
+    console.error("Ledger sync retrieval error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 export default router;

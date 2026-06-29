@@ -5,9 +5,14 @@ import { appParams } from "@/lib/app-params";
 const basePath = "/api";
 
 const request = async (path, options = {}) => {
+  const token = typeof window !== 'undefined' 
+    ? (window.localStorage.getItem("propfin_access_token") || window.localStorage.getItem("token"))
+    : null;
+    
   const response = await fetch(`${basePath}${path}`, {
     headers: {
       "Content-Type": "application/json",
+      ...(token ? { "Authorization": `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
     ...options,
@@ -56,6 +61,10 @@ const createEntityClient = (entityName) => ({
       method: "PATCH",
       body: JSON.stringify(data || {}),
     }),
+  delete: (id) =>
+    request(`/entities/${entityName}/${id}`, {
+      method: "DELETE",
+    }),
   bulkCreate: (rows) =>
     request(`/entities/${entityName}/bulk`, {
       method: "POST",
@@ -75,19 +84,30 @@ export const apiClient = {
   delete: (path) => request(path, { method: "DELETE" }),
   auth: {
     me: async () => {
-      try {
-        return await request("/auth/me");
-      } catch (_error) {
-        return {
-          id: "local-user",
-          full_name: "Local User",
-          role: "admin",
-        };
-      }
+      return await request("/auth/me");
+    },
+    login: async (email, password) => {
+      return await request("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+      });
+    },
+    signup: async (data) => {
+      return await request("/auth/signup", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+    },
+    googleLogin: async (credential) => {
+      return await request("/auth/google", {
+        method: "POST",
+        body: JSON.stringify({ credential }),
+      });
     },
     logout: () => {
       window.localStorage.removeItem("propfin_access_token");
       window.localStorage.removeItem("token");
+      window.location.reload();
     },
     redirectToLogin: (fromUrl = window.location.href) => {
       const search = new URLSearchParams({ from_url: fromUrl });

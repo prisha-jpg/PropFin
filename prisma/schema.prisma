@@ -275,6 +275,7 @@ model customers {
   loan_bank_id                                                    String?                    @db.Uuid
   loan_account_number                                             String?                    @db.VarChar(50)
   loan_sanctioned_amount                                          Decimal?                   @db.Decimal(15, 2)
+  total_outstanding_balance                                       Decimal                    @default(0) @db.Decimal(15, 2)
   gstin                                                           String?                    @db.VarChar(20)
   is_active                                                       Boolean                    @default(true)
   created_at                                                      DateTime                   @default(now()) @db.Timestamptz(6)
@@ -299,6 +300,7 @@ model customers {
   resale_requests_resale_requests_original_customer_idTocustomers resale_requests[]          @relation("resale_requests_original_customer_idTocustomers")
   sales_orders                                                    sales_orders[]
   shifting_requests                                               shifting_requests[]
+  ledger                                                          ledger[]
 
   @@index([customer_code], map: "idx_customers_code")
   @@index([full_name(ops: raw("gin_trgm_ops"))], map: "idx_customers_name", type: Gin)
@@ -607,6 +609,9 @@ model projects {
   launch_date                                                   DateTime?                      @db.Date
   completion_date                                               DateTime?                      @db.Date
   is_active                                                     Boolean                        @default(true)
+  default_caic_charges                                          Decimal?                       @default(1500000) @db.Decimal(15, 2)
+  default_maintenance_deposit                                   Decimal?                       @default(300000) @db.Decimal(15, 2)
+  default_gst_rate                                              Decimal?                       @default(5) @db.Decimal(5, 2)
   created_at                                                    DateTime                       @default(now()) @db.Timestamptz(6)
   updated_at                                                    DateTime                       @default(now()) @db.Timestamptz(6)
   created_by                                                    String?                        @db.Uuid
@@ -746,6 +751,7 @@ model sales_orders {
   users_sales_orders_sales_executive_idTousers users?                     @relation("sales_orders_sales_executive_idTousers", fields: [sales_executive_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   units                                        units                      @relation(fields: [unit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   shifting_requests                            shifting_requests[]
+  ledger                                       ledger[]
 
   @@index([customer_id], map: "idx_sales_orders_customer")
   @@index([project_id], map: "idx_sales_orders_project")
@@ -931,6 +937,7 @@ model unit_pricing {
   basic_sale_value    Decimal? @db.Decimal(15, 2)
   caic_charges        Decimal? @db.Decimal(15, 2)
   maintenance_deposit Decimal? @db.Decimal(15, 2)
+  gst_rate              Decimal? @default(5) @db.Decimal(5, 2)
   total_sale_value    Decimal? @db.Decimal(15, 2)
   created_at          DateTime @default(now()) @db.Timestamptz(6)
   updated_at          DateTime @default(now()) @db.Timestamptz(6)
@@ -973,4 +980,20 @@ model quotations {
 
   units units  @relation(fields: [unit_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users users? @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model ledger {
+  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sales_order_id   String   @db.Uuid
+  customer_id      String   @db.Uuid
+  transaction_type String   @db.VarChar(50)
+  amount           Decimal  @db.Decimal(15, 2)
+  reference_date   DateTime @db.Date
+  description      String
+  status           String   @default("UNPAID") @db.VarChar(20)
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime @default(now()) @db.Timestamptz(6)
+
+  sales_orders     sales_orders @relation(fields: [sales_order_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  customers        customers    @relation(fields: [customer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 }

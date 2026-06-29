@@ -1,76 +1,119 @@
-## PropFin Local PostgreSQL Setup
+# 🏢 PropFin — Real Estate CRM & Sales Finance Platform
 
-This project now persists frontend data to a local PostgreSQL database through a local Node API.
+PropFin is a high-performance, modern Real Estate CRM and Sales Finance management system designed to track sales orders, payment schedules, receipts, and automate financial calculations like overdue interest accruals.
 
-### 1) Create database in pgAdmin
+It is built with a **React (Vite) + Tailwind CSS** frontend and a **Node.js/Express + Prisma + PostgreSQL** backend.
 
-1. Open pgAdmin.
+---
+
+## ⚡ Key Highlights & Core Engines
+
+### 🏦 Sales & CRM Lifecycle
+- **Entity Management**: Comprehensive tracking of Projects, Blocks, Units, Customers, Sales Orders, and Co-applicants.
+- **Payment Journal & Receipts**: Record payment instruments, track cheque clearing, log cheque bounces, and apply bounce penalties.
+- **Documents & Workflows**: Generation and management of demand letters, payment reminder letters, builder NOCs, and refunds.
+
+### 📈 Pricing & Payment Schedule Engines
+- **Unit Pricing Engine**: Calculates classification rates, super built-up area pricing, caic charges, maintenance deposits, and GST.
+- **Payment Schedule Generator**: Automatically builds milestones based on template percentages, summing to 100% of the sale value.
+
+### ⚙️ Overdue Interest Calculation Engine
+- **Automated Calculations**: Calculates late payment interest and balance on a pro-rata daily basis using simple interest.
+- **Tax Compliance**: Automatically applies a **18% GST** surcharge on all late payment interest amounts.
+- **Automated Scheduler**: Background daily cron job (`node-cron` running at 23:50) that runs automated interest calculations on month-end.
+
+### 🔄 Just-In-Time (JIT) Historical Interest Sync
+- **Self-Healing Ledger**: Automatically calculates and writes missing past month-end interest entries when a customer's ledger is retrieved.
+- **Completed Months Only**: Safely backfills interest for fully closed calendar months, while ignoring current in-progress months.
+- **Concurrency Row-Lock Guard**: Runs JIT synchronization inside an ACID transaction with a database row lock (`SELECT FOR UPDATE`) on the customer record to prevent race conditions during rapid consecutive clicks.
+
+---
+
+## 🛠️ Technology Stack
+
+| Layer | Technologies |
+| :--- | :--- |
+| **Frontend** | React 18, Vite 6, Tailwind CSS, Lucide React, Framer Motion, TanStack Query (React Query) |
+| **Backend** | Node.js, Express, Prisma ORM, PostgreSQL |
+| **Utilities** | Date-fns, Node-cron, PG client |
+
+---
+
+## 🚀 Setup & Installation
+
+### 1️⃣ Database Setup
+1. Open your local PostgreSQL database (e.g. via pgAdmin or psql).
 2. Create a new database named `propfin_app`.
-3. Use any local postgres user with create/read/write access to this database.
 
-### 2) Configure environment
+### 2️⃣ Configure Environment Variables
+Create a `.env` file in the project root directory:
 
-Create a `.env` file in the project root:
-
-```bash
+```env
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/propfin_app
 API_PORT=4000
 CORS_ORIGIN=http://localhost:5173
 ```
+*Note: Update the database connection credentials/port as per your local setup.*
 
-Update username/password/port as per your local PostgreSQL setup.
-
-### 3) Install dependencies
-
+### 3️⃣ Install Dependencies & Generate Client
 ```bash
+# Install NPM packages
 npm install
-```
 
-Generate Prisma client:
-
-```bash
+# Generate Prisma Client
 npm run db:generate
+
+# Deploy Schema Migrations
+npm run db:deploy
 ```
 
-### 4) Start backend and frontend
-
-Run these in two terminals:
+### 4️⃣ Start Frontend & Backend Services
+Run the following commands in separate terminals:
 
 ```bash
+# Start backend server on port 4000
 npm run server
 ```
 
 ```bash
+# Start Vite development server on port 5173
 npm run dev
 ```
 
-Frontend calls `/api/*`, and Vite proxies those calls to `http://localhost:4000`.
-All entity records submitted from the UI are stored in PostgreSQL table `app_entity_records`.
+Vite proxies `/api/*` requests directly to `http://localhost:4000`.
 
-If you want to provision the full domain schema from this repo, run:
+---
 
+## 🧪 Testing & Verification
+
+PropFin features a comprehensive suite of unit and integration tests.
+
+### Run Core Calculator Tests
+Validates standard late interest accruals, grace period rules, GST calculations, and idempotency:
 ```bash
-npm run db:deploy
+node server/tests/interestCalculator.test.js
 ```
 
-### 5) Verify persistence
-
-In pgAdmin Query Tool:
-
-```sql
-SELECT entity_name, id, data, created_at
-FROM app_entity_records
-ORDER BY created_at DESC
-LIMIT 50;
+### Run JIT Sync Route Integration Tests
+Verifies JIT self-healing sync route, completed months filter, concurrency row-locking, and idempotency:
+```bash
+node server/tests/ledgerJitSync.test.js
 ```
 
-You should see rows appear after creating/updating data from frontend forms.
+---
 
-## Database Schema (PostgreSQL)
+## 📁 Project Structure
 
-Production-ready PostgreSQL schema and Prisma migration files are available at:
-
-- `database/postgres/001_init_sales_finance.sql`
-- `database/postgres/DEPLOYMENT.md`
-- `prisma/schema.prisma`
-- `prisma/migrations/20260404130000_init_sales_finance/migration.sql`
+```
+├── prisma/                    # Prisma Database Schema and Migrations
+├── server/
+│   ├── index.js               # Main Express Server
+│   ├── routes/                # Express Route Handlers (Pricing, Documents, etc.)
+│   ├── jobs/                  # Automated Background Cron Jobs
+│   ├── utils/                 # Calculation Engines & JIT Sync Helpers
+│   └── tests/                 # Unit & Integration Test Suites
+├── src/                       # Frontend React Source Files
+│   ├── api/                   # API Client (using apiClient)
+│   ├── components/            # Shared UI Components
+│   └── pages/                 # CRM Dashboard and Reports Pages
+```

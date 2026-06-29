@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/lib/AuthContext";
 import UserNotRegisteredError from "@/components/UserNotRegisteredError";
 
 import AppLayout from "@/components/layout/AppLayout";
+import AuthPages from "@/pages/AuthPages";
 
 // Core Pages
 import Dashboard from "@/pages/Dashboard";
@@ -56,27 +57,21 @@ import BankMasterPage from "@/pages/setup/BankMasterPage";
 import TDSAccountPage from "@/pages/setup/TDSAccountPage";
 
 function AuthenticatedApp() {
-  const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
+  const { isAuthenticated, isLoadingAuth } = useAuth();
 
-  if (isLoadingPublicSettings || isLoadingAuth) {
+  if (isLoadingAuth) {
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-4 border-slate-200 border-t-primary rounded-full animate-spin"></div>
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <p className="text-sm text-muted-foreground">Verifying Workspace Session...</p>
         </div>
       </div>
     );
   }
 
-  if (authError) {
-    if (authError.type === "user_not_registered") {
-      return <UserNotRegisteredError />;
-    }
-    if (authError.type === "auth_required") {
-      navigateToLogin();
-      return null;
-    }
+  if (!isAuthenticated) {
+    return <AuthPages />;
   }
 
   return (

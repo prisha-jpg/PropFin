@@ -5,7 +5,7 @@ import PageHeader from "../../components/shared/PageHeader";
 import DataTable from "../../components/shared/DataTable";
 import StatusBadge from "../../components/shared/StatusBadge";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { Plus, Download, AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ReceiptForm from "../../components/receipts/ReceiptForm";
 import { format } from "date-fns";
@@ -26,6 +26,19 @@ export default function PaymentJournal() {
     onError: (error) => { toast.error(error.message || "Failed to record payment."); }
   });
 
+  const bounceMutation = useMutation({
+    mutationFn: (id) => apiClient.post(`/receipts/${id}/bounce`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["receipts"] });
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      queryClient.invalidateQueries({ queryKey: ["ledgerEntries"] });
+      toast.success("Cheque bounce recorded. Ledger reversed and penalty posted.");
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to bounce cheque.");
+    }
+  });
+
   const columns = [
     { header: "Receipt #", accessor: "receipt_number", cell: r => <span className="font-mono text-xs font-semibold">{r.receipt_number || "—"}</span> },
     { header: "Customer", accessor: "customer_name", cell: r => <span className="font-medium">{r.customer_name || "—"}</span> },
@@ -35,7 +48,37 @@ export default function PaymentJournal() {
     { header: "Mode", accessor: "payment_mode", cell: r => <span className="uppercase text-xs">{r.payment_mode || "—"}</span> },
     { header: "Reference", accessor: "reference_number", cell: r => <span className="font-mono text-xs">{r.reference_number || "—"}</span> },
     { header: "Towards", accessor: "towards", cell: r => (r.towards || "—").replace(/_/g, " ") },
-    { header: "Status", accessor: "status", cell: r => <StatusBadge status={r.status} /> }
+    { header: "Status", accessor: "status", cell: r => <StatusBadge status={r.status} /> },
+    {
+      header: "Actions",
+      accessor: "id",
+      cell: r => (
+        <div className="flex items-center gap-1 justify-center">
+          <a
+            href={`/api/documents/receipt/${r.id}/download`}
+            download
+            className="inline-flex items-center justify-center rounded-md p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-200/50 transition-colors"
+            title="Download PDF"
+          >
+            <Download className="w-4 h-4" />
+          </a>
+          {r.status !== "bounced" && (
+            <button
+              onClick={() => {
+                if (window.confirm(`Are you sure you want to mark Receipt #${r.receipt_number} as BOUNCED? This will reverse the ledger credit and apply a ₹500 bounce charge.`)) {
+                  bounceMutation.mutate(r.id);
+                }
+              }}
+              disabled={bounceMutation.isPending}
+              className="inline-flex items-center justify-center rounded-md p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50/80 transition-colors"
+              title="Bounce Cheque"
+            >
+              <AlertTriangle className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      )
+    }
   ];
 
   return (

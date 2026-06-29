@@ -10,7 +10,7 @@ export const AuthProvider = ({ children }) => {
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isLoadingPublicSettings, setIsLoadingPublicSettings] = useState(true);
   const [authError, setAuthError] = useState(null);
-  const [appPublicSettings, setAppPublicSettings] = useState(null); // Contains only { id, public_settings }
+  const [appPublicSettings, setAppPublicSettings] = useState(null);
 
   useEffect(() => {
     checkAppState();
@@ -21,119 +21,122 @@ export const AuthProvider = ({ children }) => {
       setIsLoadingPublicSettings(true);
       setAuthError(null);
       
-      // First, check app public settings (with token if available)
-      // This will tell us if auth is required, user not registered, etc.
+      // Load public settings
       try {
-        const headers = {
-          'X-App-Id': appParams.appId,
-        };
-        if (appParams.token) {
-          headers.Authorization = `Bearer ${appParams.token}`;
-        }
-
-        const response = await fetch(`/api/apps/public/prod/public-settings/by-id/${appParams.appId}`, {
-          headers,
-        });
-
+        const response = await fetch(`/api/apps/public/prod/public-settings/by-id/${appParams.appId || 'default'}`);
         const publicSettings = await response.json();
-        if (!response.ok) {
-          const error = new Error(publicSettings?.message || 'Failed to load app settings');
-          error.status = response.status;
-          error.data = publicSettings;
-          throw error;
-        }
-
         setAppPublicSettings(publicSettings);
-        
-        // If we got the app public settings successfully, check if user is authenticated
-        if (appParams.token) {
-          await checkUserAuth();
-        } else {
-          setIsLoadingAuth(false);
-          setIsAuthenticated(false);
-        }
-        setIsLoadingPublicSettings(false);
       } catch (appError) {
-        console.error('App state check failed:', appError);
-        
-        // Handle app-level errors
-        if (appError.status === 403 && appError.data?.extra_data?.reason) {
-          const reason = appError.data.extra_data.reason;
-          if (reason === 'auth_required') {
-            setAuthError({
-              type: 'auth_required',
-              message: 'Authentication required'
-            });
-          } else if (reason === 'user_not_registered') {
-            setAuthError({
-              type: 'user_not_registered',
-              message: 'User not registered for this app'
-            });
-          } else {
-            setAuthError({
-              type: reason,
-              message: appError.message
-            });
-          }
-        } else {
-          setAuthError({
-            type: 'unknown',
-            message: appError.message || 'Failed to load app'
-          });
-        }
-        setIsLoadingPublicSettings(false);
+        console.warn('Public settings could not be fetched:', appError);
+      }
+      setIsLoadingPublicSettings(false);
+
+      // Verify active user session
+      const storedToken = window.localStorage.getItem("propfin_access_token") || window.localStorage.getItem("token");
+      if (storedToken) {
+        await verifySession();
+      } else {
+        setIsAuthenticated(false);
         setIsLoadingAuth(false);
       }
     } catch (error) {
-      console.error('Unexpected error:', error);
-      setAuthError({
-        type: 'unknown',
-        message: error.message || 'An unexpected error occurred'
-      });
-      setIsLoadingPublicSettings(false);
+      console.error('App state init failed:', error);
+      setIsAuthenticated(false);
       setIsLoadingAuth(false);
     }
   };
 
-  const checkUserAuth = async () => {
+  const verifySession = async () => {
     try {
-      // Now check if the user is authenticated
       setIsLoadingAuth(true);
       const currentUser = await apiClient.auth.me();
       setUser(currentUser);
       setIsAuthenticated(true);
-      setIsLoadingAuth(false);
     } catch (error) {
-      console.error('User auth check failed:', error);
-      setIsLoadingAuth(false);
+      console.warn('Session verification failed, logging out:', error);
+      window.localStorage.removeItem("propfin_access_token");
+      window.localStorage.removeItem("token");
+      setUser(null);
       setIsAuthenticated(false);
-      
-      // If user auth fails, it might be an expired token
-      if (error.status === 401 || error.status === 403) {
-        setAuthError({
-          type: 'auth_required',
-          message: 'Authentication required'
-        });
-      }
+    } finally {
+      setIsLoadingAuth(false);
     }
   };
 
-  const logout = (shouldRedirect = true) => {
+  const login = async (email, password) => {
+    setIsLoadingAuth(true);
+    setAuthError(null);
+    try {
+      const response = await apiClient.auth.login(email, password);
+      if (response && response.token) {
+        window.localStorage.setItem("propfin_access_token", response.token);
+        window.localStorage.setItem("token", response.token);
+        setUser(response.user);
+        setIsAuthenticated(true);
+        return { success: true };
+      } else {
+        throw new Error("Invalid response payload from server");
+      }
+    } catch (error) {
+      setAuthError(error.message || "Failed to log in");
+      setIsAuthenticated(false);
+      throw error;
+    } finally {
+      setIsLoadingAuth(false);
+    }
+  };
+
+  const signup = async (signupData) => {
+    setIsLoadingAuth(true);
+    setAuthError(null);
+    try {
+      const response = await apiClient.auth.signup(signupData);
+      if (response && response.token) {
+        window.localStorage.setItem("propfin_access_token", response.token);
+        window.localStorage.setItem("token", response.token);
+        setUser(response.user);
+        setIsAuthenticated(true);
+        return { success: true };
+      } else {
+        throw new Error("Invalid response payload from server");
+      }
+    } catch (error) {
+      setAuthError(error.message || "Failed to sign up");
+      setIsAuthenticated(false);
+      throw error;
+    } finally {
+      setIsLoadingAuth(false);
+    }
+  };
+
+  const googleLogin = async (credential) => {
+    setIsLoadingAuth(true);
+    setAuthError(null);
+    try {
+      const response = await apiClient.auth.googleLogin(credential);
+      if (response && response.token) {
+        window.localStorage.setItem("propfin_access_token", response.token);
+        window.localStorage.setItem("token", response.token);
+        setUser(response.user);
+        setIsAuthenticated(true);
+        return { success: true };
+      } else {
+        throw new Error("Google login verification failed");
+      }
+    } catch (error) {
+      setAuthError(error.message || "Google Sign-in failed");
+      setIsAuthenticated(false);
+      throw error;
+    } finally {
+      setIsLoadingAuth(false);
+    }
+  };
+
+  const logout = () => {
+    window.localStorage.removeItem("propfin_access_token");
+    window.localStorage.removeItem("token");
     setUser(null);
     setIsAuthenticated(false);
-    
-    if (shouldRedirect) {
-      // Use the SDK's logout method which handles token cleanup and redirect
-      apiClient.auth.logout(window.location.href);
-    } else {
-      // Just remove the token without redirect
-      apiClient.auth.logout();
-    }
-  };
-
-  const navigateToLogin = () => {
-    // Use the SDK's redirectToLogin method
-    apiClient.auth.redirectToLogin(window.location.href);
   };
 
   return (
@@ -144,8 +147,10 @@ export const AuthProvider = ({ children }) => {
       isLoadingPublicSettings,
       authError,
       appPublicSettings,
+      login,
+      signup,
+      googleLogin,
       logout,
-      navigateToLogin,
       checkAppState
     }}>
       {children}

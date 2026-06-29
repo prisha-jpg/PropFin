@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { apiClient } from "@/api/apiClient";
+import { resolvePricingField } from "@/lib/unitPricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -31,6 +32,7 @@ const MasterPriceList = () => {
       setLocalData(
         units.map((u) => {
           const p = u.unitPricing || {};
+          const project = u.projects || {};
           return {
             unit_id: u.id,
             unit_number: u.unit_number,
@@ -42,8 +44,18 @@ const MasterPriceList = () => {
             sba: parseFloat(u.super_built_up_area || 0),
             classification: p.classification || "Luxury",
             rate_per_sqft: parseFloat(p.rate_per_sqft || 0),
-            caic_charges: parseFloat(p.caic_charges || 0),
-            maintenance_deposit: parseFloat(p.maintenance_deposit || 0),
+            caic_charges: resolvePricingField(
+              p.caic_charges,
+              project.default_caic_charges,
+              0,
+              { treatZeroAsUnset: true },
+            ),
+            maintenance_deposit: resolvePricingField(
+              p.maintenance_deposit,
+              project.default_maintenance_deposit,
+              300000,
+            ),
+            gst_rate: resolvePricingField(p.gst_rate, project.default_gst_rate, 5),
           };
         })
       );
@@ -54,7 +66,7 @@ const MasterPriceList = () => {
     mutationFn: (prices) => apiClient.post("/pricing/master", { prices }),
     onSuccess: () => {
       toast.success("Master prices saved successfully");
-      queryClient.invalidateQueries(["master-price-list"]);
+      queryClient.invalidateQueries({ queryKey: ["master-price-list"] });
     },
     onError: (err) => {
       toast.error(err.response?.data?.error || "Failed to save prices");
@@ -69,15 +81,19 @@ const MasterPriceList = () => {
 
   const handleSave = () => {
     const payload = localData.map((row) => {
-      const bsv = (row.sba * row.rate_per_sqft) + row.caic_charges;
+      const bsv = row.sba * row.rate_per_sqft + row.caic_charges;
+      const gstRate = Number(row.gst_rate ?? 5);
+      const gstAmount = bsv * (gstRate / 100);
       return {
         unit_id: row.unit_id,
+        sba: row.sba,
         classification: row.classification,
         rate_per_sqft: row.rate_per_sqft,
         caic_charges: row.caic_charges,
         maintenance_deposit: row.maintenance_deposit,
+        gst_rate: gstRate,
         basic_sale_value: bsv,
-        total_sale_value: (bsv * 1.05) + row.maintenance_deposit,
+        total_sale_value: bsv + gstAmount + row.maintenance_deposit,
       };
     });
     mutation.mutate(payload);
@@ -123,16 +139,17 @@ const MasterPriceList = () => {
                   <TableHead className="text-right w-[120px]">Rate/Sq.Ft</TableHead>
                   <TableHead className="text-right w-[120px]">CAIC Charges</TableHead>
                   <TableHead className="text-right w-[150px]">Basic Sale Value</TableHead>
-                  <TableHead className="text-right w-[150px]">GST @ 5%</TableHead>
-                  <TableHead className="text-right w-[180px]">BSV with GST</TableHead>
+                  <TableHead className="text-right w-[100px]">GST (%)</TableHead>
+                  <TableHead className="text-right w-[150px]">GST Charges</TableHead>
                   <TableHead className="text-right w-[150px]">Maintenance Deposit</TableHead>
                   <TableHead className="text-right w-[180px]">Total Sale Value</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {localData.map((row, index) => {
-                  const bsv = (row.sba * row.rate_per_sqft) + row.caic_charges;
-                  const gst = bsv * 0.05;
+                  const bsv = row.sba * row.rate_per_sqft + row.caic_charges;
+                  const gstRate = Number(row.gst_rate ?? 5);
+                  const gst = bsv * (gstRate / 100);
                   const bsvWithGst = bsv + gst;
                   const totalSaleValue = bsvWithGst + row.maintenance_deposit;
                   
@@ -187,11 +204,20 @@ const MasterPriceList = () => {
                       <TableCell className="text-right font-medium">
                         ₹{bsv.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </TableCell>
+                      <TableCell>
+                        <div className="flex justify-end">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            className="h-8 w-[72px] text-right"
+                            value={row.gst_rate ?? 5}
+                            onChange={(e) => handleUpdate(row.unit_id, "gst_rate", parseFloat(e.target.value) || 0)}
+                          />
+                        </div>
+                      </TableCell>
                       <TableCell className="text-right">
                         ₹{gst.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        ₹{bsvWithGst.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </TableCell>
                       <TableCell>
                          <div className="flex justify-end">

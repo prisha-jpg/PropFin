@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
   Building2, 
   FileSpreadsheet, 
@@ -9,24 +10,22 @@ import {
   Save,
   Settings2,
   CheckCircle2,
-  Wallet,
   Plus,
   Trash2,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from "lucide-react";
 import { 
   Card, 
   CardContent, 
   CardDescription, 
   CardHeader, 
-  CardTitle,
-  CardFooter
+  CardTitle
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -37,13 +36,41 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/components/ui/use-toast";
+import { apiClient } from "@/api/apiClient";
+import { resolvePricingField } from "@/lib/unitPricing";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
-// --- INITIAL STATE DATA ---
-const initialMasterList = [
-  { id: 1, unit: "E-1011", type: "3 BHK", block: "Block 1", floor: "1", sba: 1509.56, rate: 11340 },
-  { id: 2, unit: "F-1012", type: "3 BHK", block: "Block 1", floor: "1", sba: 1511.04, rate: 11340 },
-  { id: 3, unit: "L-3011", type: "4.5 BHK", block: "Block 3", floor: "1", sba: 2987.09, rate: 11640 },
-];
+const mapUnitsToMasterList = (units) =>
+  (units || []).map((u) => {
+    const p = u.unitPricing || {};
+    const project = u.projects || {};
+    return {
+      unit_id: u.id,
+      project_id: u.project_id,
+      project_name: project.project_name || "",
+      unit: u.unit_number,
+      type: u.unit_type || "",
+      block: u.blocks?.block_name || "",
+      floor: String(u.floor_number ?? ""),
+      sba: parseFloat(u.super_built_up_area || 0),
+      rate: parseFloat(p.rate_per_sqft || 0),
+      caic: resolvePricingField(p.caic_charges, project.default_caic_charges, 0, {
+        treatZeroAsUnset: true,
+      }),
+      maintenance: resolvePricingField(
+        p.maintenance_deposit,
+        project.default_maintenance_deposit,
+        300000,
+      ),
+      gst_rate: resolvePricingField(p.gst_rate, project.default_gst_rate, 5),
+    };
+  });
 
 const initialPaymentSchedule = [
   { id: 1, name: "Booking Amount", percent: 10 },
@@ -65,11 +92,110 @@ const initialPaymentSchedule = [
 
 export default function PresalesHub() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("master-pl");
 
-  // --- STATE MANAGEMENT ---
-  const [masterList, setMasterList] = useState(initialMasterList);
+  const { data: masterUnits, isLoading: isLoadingMaster } = useQuery({
+    queryKey: ["master-price-list"],
+    queryFn: () => apiClient.get("/pricing/master"),
+  });
+
+  const { data: projects = [] } = useQuery({
+    queryKey: ["projects"],
+    queryFn: () => apiClient.entities.Project.list(),
+  });
+
+  const [masterList, setMasterList] = useState([]);
   const [paymentSchedule, setPaymentSchedule] = useState(initialPaymentSchedule);
+  const [selectedProjectId, setSelectedProjectId] = useState("all");
+  const [projectDefaults, setProjectDefaults] = useState({
+    default_caic_charges: 1500000,
+    default_maintenance_deposit: 300000,
+    default_gst_rate: 5,
+  });
+
+  useEffect(() => {
+    if (masterUnits) {
+      setMasterList(mapUnitsToMasterList(masterUnits));
+    }
+  }, [masterUnits]);
+
+  useEffect(() => {
+    if (selectedProjectId === "all" || !projects.length) return;
+    const project = projects.find((p) => p.id === selectedProjectId);
+    if (project) {
+      setProjectDefaults({
+        default_caic_charges: Number(project.default_caic_charges ?? 1500000),
+        default_maintenance_deposit: Number(project.default_maintenance_deposit ?? 300000),
+        default_gst_rate: Number(project.default_gst_rate ?? 5),
+      });
+    }
+  }, [selectedProjectId, projects]);
+
+  const filteredMasterList =
+    selectedProjectId === "all"
+      ? masterList
+      : masterList.filter((row) => row.project_id === selectedProjectId);
+
+  const saveProjectDefaultsMutation = useMutation({
+    mutationFn: ({ projectId, defaults }) =>
+      apiClient.entities.Project.update(projectId, defaults),
+    onSuccess: () => {
+      toast({ title: "Saved!", description: "Project pricing defaults updated." });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["master-price-list"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Save Failed",
+        description: err.message || "Could not save project defaults.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const saveMasterMutation = useMutation({
+    mutationFn: (prices) => apiClient.post("/pricing/master", { prices }),
+    onSuccess: () => {
+      toast({ title: "Saved!", description: "Master pricelist saved to database." });
+      queryClient.invalidateQueries({ queryKey: ["master-price-list"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Save Failed",
+        description: err.message || "Could not save master pricelist.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleSaveConfiguration = () => {
+    if (activeTab === "master-pl") {
+      const payload = masterList
+        .filter((row) => row.unit_id)
+        .map((row) => {
+          const bsv = Number(row.sba) * Number(row.rate) + Number(row.caic || 0);
+          const gstRate = Number(row.gst_rate ?? 5);
+          const gstAmount = bsv * (gstRate / 100);
+          const maintenance = Number(row.maintenance || 300000);
+          return {
+            unit_id: row.unit_id,
+            sba: Number(row.sba),
+            unit_type: row.type,
+            floor_number: row.floor,
+            rate_per_sqft: Number(row.rate),
+            caic_charges: Number(row.caic || 0),
+            maintenance_deposit: maintenance,
+            gst_rate: gstRate,
+            basic_sale_value: bsv,
+            total_sale_value: bsv + gstAmount + maintenance,
+          };
+        });
+      saveMasterMutation.mutate(payload);
+    } else {
+      toast({ title: "Saved!", description: "Configuration saved locally." });
+    }
+  };
 
   const [unitConfig, setUnitConfig] = useState({
     sba: 2987.09,
@@ -80,20 +206,68 @@ export default function PresalesHub() {
   });
   const [unitBreakdown, setUnitBreakdown] = useState(null);
 
-  // --- TAB 1: MASTER LIST HANDLERS ---
-  const updateMasterList = (id, field, value) => {
-    setMasterList(prev => prev.map(row => 
-      row.id === id ? { ...row, [field]: value } : row
-    ));
+  const updateMasterList = (unitId, field, value) => {
+    setMasterList((prev) =>
+      prev.map((row) => (row.unit_id === unitId ? { ...row, [field]: value } : row)),
+    );
+  };
+
+  const handleSaveProjectDefaults = () => {
+    if (selectedProjectId === "all") {
+      toast({
+        title: "Select a project",
+        description: "Choose a project to save its pricing defaults.",
+        variant: "destructive",
+      });
+      return;
+    }
+    saveProjectDefaultsMutation.mutate({
+      projectId: selectedProjectId,
+      defaults: {
+        default_caic_charges: Number(projectDefaults.default_caic_charges) || 0,
+        default_maintenance_deposit: Number(projectDefaults.default_maintenance_deposit) || 300000,
+        default_gst_rate: Number(projectDefaults.default_gst_rate) || 5,
+      },
+    });
+  };
+
+  const handleApplyProjectDefaults = () => {
+    if (selectedProjectId === "all") {
+      toast({
+        title: "Select a project",
+        description: "Choose a project to apply defaults to its units.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const caic = Number(projectDefaults.default_caic_charges) || 0;
+    const maintenance = Number(projectDefaults.default_maintenance_deposit) || 300000;
+    const gstRate = Number(projectDefaults.default_gst_rate) || 5;
+    setMasterList((prev) =>
+      prev.map((row) =>
+        row.project_id === selectedProjectId
+          ? { ...row, caic, maintenance, gst_rate: gstRate }
+          : row,
+      ),
+    );
+    toast({
+      title: "Defaults applied",
+      description: "CAIC, GST, and maintenance values applied to all units in this project.",
+    });
   };
 
   const addMasterRow = () => {
-    const newId = masterList.length ? Math.max(...masterList.map(r => r.id)) + 1 : 1;
-    setMasterList([...masterList, { id: newId, unit: "", type: "", block: "", floor: "", sba: 0, rate: 0 }]);
+    toast({
+      title: "Add units in Setup",
+      description: "New units must be created in the inventory first, then priced here.",
+    });
   };
 
-  const deleteMasterRow = (id) => {
-    setMasterList(prev => prev.filter(row => row.id !== id));
+  const deleteMasterRow = () => {
+    toast({
+      title: "Cannot remove",
+      description: "Units are managed in inventory. Edit pricing values here instead.",
+    });
   };
 
   // --- TAB 2: UNITWISE CALCULATION HANDLER ---
@@ -139,8 +313,16 @@ export default function PresalesHub() {
           <Button variant="outline" className="bg-white">
             <Download className="w-4 h-4 mr-2" /> Export
           </Button>
-          <Button onClick={() => toast({ title: "Saved!", description: "Configurations saved to database." })}>
-            <Save className="w-4 h-4 mr-2" /> Save Configuration
+          <Button
+            onClick={handleSaveConfiguration}
+            disabled={saveMasterMutation.isPending}
+          >
+            {saveMasterMutation.isPending ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4 mr-2" />
+            )}
+            Save Configuration
           </Button>
         </div>
       </div>
@@ -171,7 +353,7 @@ export default function PresalesHub() {
               <div>
                 <CardTitle className="text-xl text-slate-800">Master Pricelist Data</CardTitle>
                 <CardDescription className="mt-1">
-                  Editable Excel-like grid. Add, update, or remove unit templates.
+                  Editable Excel-like grid. Set project defaults or edit each unit row.
                 </CardDescription>
               </div>
               <div className="flex gap-2">
@@ -183,6 +365,90 @@ export default function PresalesHub() {
                 </Button>
               </div>
             </CardHeader>
+            <CardContent className="p-0">
+              <div className="border-b border-slate-100 bg-slate-50/80 px-6 py-4 flex flex-col lg:flex-row lg:items-end gap-4">
+                <div className="space-y-1.5">
+                  <Label>Project</Label>
+                  <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
+                    <SelectTrigger className="w-[220px] bg-white">
+                      <SelectValue placeholder="All projects" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Projects</SelectItem>
+                      {projects.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.project_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>CAIC Charges (Project Default)</Label>
+                  <Input
+                    type="number"
+                    className="w-[160px] bg-white"
+                    value={projectDefaults.default_caic_charges}
+                    onChange={(e) =>
+                      setProjectDefaults((prev) => ({
+                        ...prev,
+                        default_caic_charges: e.target.value,
+                      }))
+                    }
+                    disabled={selectedProjectId === "all"}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>GST % (Project Default)</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    className="w-[100px] bg-white"
+                    value={projectDefaults.default_gst_rate}
+                    onChange={(e) =>
+                      setProjectDefaults((prev) => ({
+                        ...prev,
+                        default_gst_rate: e.target.value,
+                      }))
+                    }
+                    disabled={selectedProjectId === "all"}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Maint. Deposit (Project Default)</Label>
+                  <Input
+                    type="number"
+                    className="w-[160px] bg-white"
+                    value={projectDefaults.default_maintenance_deposit}
+                    onChange={(e) =>
+                      setProjectDefaults((prev) => ({
+                        ...prev,
+                        default_maintenance_deposit: e.target.value,
+                      }))
+                    }
+                    disabled={selectedProjectId === "all"}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="bg-white"
+                    onClick={handleSaveProjectDefaults}
+                    disabled={selectedProjectId === "all" || saveProjectDefaultsMutation.isPending}
+                  >
+                    Save Project Defaults
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="bg-blue-50 text-blue-700 hover:bg-blue-100"
+                    onClick={handleApplyProjectDefaults}
+                    disabled={selectedProjectId === "all"}
+                  >
+                    Apply to All Units
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
             <CardContent className="p-0 overflow-x-auto">
               <Table>
                 <TableHeader className="bg-slate-50">
@@ -193,46 +459,90 @@ export default function PresalesHub() {
                     <TableHead className="w-[100px]">Floor</TableHead>
                     <TableHead className="w-[120px] text-right">SBA (Sq.Ft)</TableHead>
                     <TableHead className="w-[120px] text-right">Rate (₹)</TableHead>
+                    <TableHead className="w-[140px] text-right">CAIC Charges</TableHead>
                     <TableHead className="text-right text-slate-500">Base Sale Value</TableHead>
+                    <TableHead className="w-[100px] text-right">GST (%)</TableHead>
+                    <TableHead className="text-right text-slate-500">GST Charges</TableHead>
+                    <TableHead className="w-[150px] text-right">Maint. Deposit</TableHead>
                     <TableHead className="text-right text-blue-600">Total Value</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {masterList.map((row) => {
-                    const bsv = (Number(row.sba) || 0) * (Number(row.rate) || 0);
-                    const gst = bsv * 0.05;
-                    const total = bsv > 0 ? bsv + gst + 300000 : 0; // Standard calc
+                  {isLoadingMaster ? (
+                    <TableRow>
+                      <TableCell colSpan={13} className="h-24 text-center">
+                        <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary" />
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredMasterList.map((row) => {
+                    const bsv = (Number(row.sba) || 0) * (Number(row.rate) || 0) + (Number(row.caic) || 0);
+                    const gstRate = Number(row.gst_rate ?? 5);
+                    const gst = bsv * (gstRate / 100);
+                    const maintenance = Number(row.maintenance) || 300000;
+                    const total = bsv > 0 ? bsv + gst + maintenance : 0;
                     return (
-                      <TableRow key={row.id} className="hover:bg-slate-50/50 group">
+                      <TableRow key={row.unit_id} className="hover:bg-slate-50/50 group">
+                        <TableCell className="font-medium">{row.unit}</TableCell>
                         <TableCell>
-                          <Input value={row.unit} onChange={(e) => updateMasterList(row.id, 'unit', e.target.value)} className="h-8 border-transparent hover:border-slate-200 focus:border-blue-500" />
+                          <Input value={row.type} onChange={(e) => updateMasterList(row.unit_id, "type", e.target.value)} className="h-8 border-transparent hover:border-slate-200 focus:border-blue-500" />
+                        </TableCell>
+                        <TableCell>{row.block}</TableCell>
+                        <TableCell>
+                          <Input value={row.floor} onChange={(e) => updateMasterList(row.unit_id, "floor", e.target.value)} className="h-8 border-transparent hover:border-slate-200 focus:border-blue-500" />
                         </TableCell>
                         <TableCell>
-                          <Input value={row.type} onChange={(e) => updateMasterList(row.id, 'type', e.target.value)} className="h-8 border-transparent hover:border-slate-200 focus:border-blue-500" />
+                          <Input type="number" step="0.01" value={row.sba} onChange={(e) => updateMasterList(row.unit_id, "sba", e.target.value)} className="h-8 text-right font-medium border-transparent hover:border-slate-200 focus:border-blue-500" />
                         </TableCell>
                         <TableCell>
-                          <Input value={row.block} onChange={(e) => updateMasterList(row.id, 'block', e.target.value)} className="h-8 border-transparent hover:border-slate-200 focus:border-blue-500" />
+                          <Input type="number" value={row.rate} onChange={(e) => updateMasterList(row.unit_id, "rate", e.target.value)} className="h-8 text-right border-transparent hover:border-slate-200 focus:border-blue-500" />
                         </TableCell>
                         <TableCell>
-                          <Input value={row.floor} onChange={(e) => updateMasterList(row.id, 'floor', e.target.value)} className="h-8 border-transparent hover:border-slate-200 focus:border-blue-500" />
+                          <div className="flex justify-end">
+                            <Input
+                              type="number"
+                              value={row.caic ?? ""}
+                              onChange={(e) => updateMasterList(row.unit_id, "caic", e.target.value)}
+                              className="h-8 w-[130px] text-right border-transparent hover:border-slate-200 focus:border-blue-500"
+                            />
+                          </div>
                         </TableCell>
+                        <TableCell className="text-right text-slate-500 align-middle pr-4">₹{bsv.toLocaleString("en-IN")}</TableCell>
                         <TableCell>
-                          <Input type="number" value={row.sba} onChange={(e) => updateMasterList(row.id, 'sba', e.target.value)} className="h-8 text-right font-medium border-transparent hover:border-slate-200 focus:border-blue-500" />
+                          <div className="flex justify-end">
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={row.gst_rate ?? 5}
+                              onChange={(e) => updateMasterList(row.unit_id, "gst_rate", e.target.value)}
+                              className="h-8 w-[72px] text-right border-transparent hover:border-slate-200 focus:border-blue-500"
+                            />
+                          </div>
                         </TableCell>
+                        <TableCell className="text-right text-slate-500 align-middle pr-4">₹{gst.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</TableCell>
                         <TableCell>
-                          <Input type="number" value={row.rate} onChange={(e) => updateMasterList(row.id, 'rate', e.target.value)} className="h-8 text-right border-transparent hover:border-slate-200 focus:border-blue-500" />
+                          <div className="flex justify-end">
+                            <Input
+                              type="number"
+                              value={row.maintenance ?? 300000}
+                              onChange={(e) => updateMasterList(row.unit_id, "maintenance", e.target.value)}
+                              className="h-8 w-[120px] text-right border-transparent hover:border-slate-200 focus:border-blue-500"
+                            />
+                          </div>
                         </TableCell>
-                        <TableCell className="text-right text-slate-500 align-middle pr-4">₹{bsv.toLocaleString('en-IN')}</TableCell>
-                        <TableCell className="text-right font-bold text-slate-800 align-middle pr-4">₹{total.toLocaleString('en-IN')}</TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="icon" onClick={() => deleteMasterRow(row.id)} className="h-8 w-8 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </TableCell>
+                        <TableCell className="text-right font-bold text-slate-800 align-middle pr-4">₹{total.toLocaleString("en-IN")}</TableCell>
+                        <TableCell></TableCell>
                       </TableRow>
                     );
                   })}
+                  {!isLoadingMaster && filteredMasterList.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={13} className="h-24 text-center text-slate-500">
+                        No units found. Add units to inventory and configure pricing.
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </CardContent>
