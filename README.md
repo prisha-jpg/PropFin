@@ -18,12 +18,14 @@ It is built with a **React (Vite) + Tailwind CSS** frontend and a **Node.js/Expr
 - **Payment Schedule Generator**: Automatically builds milestones based on template percentages, summing to 100% of the sale value.
 
 ### ⚙️ Overdue Interest Calculation Engine
-- **Automated Calculations**: Calculates late payment interest and balance on a pro-rata daily basis using simple interest.
+- **FIFO Waterfall Receipt Allocation**: Cleared customer receipts are dynamically allocated to unpaid milestone demands using a chronological FIFO waterfall model. Overdue interest is only computed on the actual remaining outstanding principal.
+- **Overdue Interest Start Date**: Penalty interest starts accruing strictly $1 \text{ day}$ after the milestone due date has elapsed.
+- **Daily Pro-Rata Chunking**: Mid-month customer payments split interest calculation into daily chunks to ensure pro-rata interest is charged accurately.
 - **Tax Compliance**: Automatically applies a **18% GST** surcharge on all late payment interest amounts.
 - **Automated Scheduler**: Background daily cron job (`node-cron` running at 23:50) that runs automated interest calculations on month-end.
 
-### 🔄 Just-In-Time (JIT) Historical Interest Sync
-- **Self-Healing Ledger**: Automatically calculates and writes missing past month-end interest entries when a customer's ledger is retrieved.
+### 🔄 Just-In-Time (JIT) Historical Interest Sync & Database Self-Healing
+- **Database Self-Healing**: On ledger retrieval, the JIT sync engine deletes stale interest entries, recalculates the base outstanding balance (demands minus receipts and TDS) from scratch, posts correct interest entries, and updates the customer's total outstanding balance dynamically.
 - **Completed Months Only**: Safely backfills interest for fully closed calendar months, while ignoring current in-progress months.
 - **Concurrency Row-Lock Guard**: Runs JIT synchronization inside an ACID transaction with a database row lock (`SELECT FOR UPDATE`) on the customer record to prevent race conditions during rapid consecutive clicks.
 
@@ -89,7 +91,7 @@ Vite proxies `/api/*` requests directly to `http://localhost:4000`.
 PropFin features a comprehensive suite of unit and integration tests.
 
 ### Run Core Calculator Tests
-Validates standard late interest accruals, grace period rules, GST calculations, and idempotency:
+Validates standard late interest accruals, grace period rules, GST calculations, and database integrations:
 ```bash
 node server/tests/interestCalculator.test.js
 ```
@@ -98,6 +100,18 @@ node server/tests/interestCalculator.test.js
 Verifies JIT self-healing sync route, completed months filter, concurrency row-locking, and idempotency:
 ```bash
 node server/tests/ledgerJitSync.test.js
+```
+
+### Run Cron Job & PRL Demand Integration Tests
+Verifies scheduled daily interest cron run, month-end filtering, and PRL demand grouping:
+```bash
+node server/tests/automatedCron.test.js
+```
+
+### Run Route-Level Interest Integration Tests
+Validates REST API endpoint `/api/pricing/calculate-interest` integration on active database records:
+```bash
+node server/tests/calculateInterestRoute.test.js
 ```
 
 ---
