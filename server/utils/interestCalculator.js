@@ -392,101 +392,263 @@ export async function syncHistoricalInterest(customerId, tx) {
     }
   });
 
+  // 1. Delete all existing interest entries for this customer to ensure clean calculation from scratch
+  await tx.ledger.deleteMany({
+    where: {
+      customer_id: customerId,
+      transaction_type: "LATE_FEE_INTEREST"
+    }
+  });
+
+  // 2. Fetch non-interest ledger entries for base outstanding balance calculation
+  const nonInterestLedgers = await tx.ledger.findMany({
+    where: {
+      customer_id: customerId,
+      transaction_type: { not: "LATE_FEE_INTEREST" }
+    }
+  });
+
+  // 3. Calculate the clean base outstanding balance (without interest)
+  let baseOutstanding = 0;
+
   for (const order of salesOrders) {
-    // Fetch outstanding standard schedules and PRL demands
-    const schedules = await tx.payment_schedules.findMany({
+    const allDemands = await tx.demand_letters.findMany({
       where: {
         sales_order_id: order.id,
-        status: { not: "paid" }
-      },
-      orderBy: { original_due_date: "asc" }
+        status: { not: "cancelled" }
+      }
+    });
+    allDemands.forEach(d => {
+      baseOutstanding += Number(d.principal_amount || 0) + Number(d.other_charges || 0); // principal + gst (other_charges)
     });
 
-    const receipts = await tx.customer_receipts.findMany({
-      where: { sales_order_id: order.id, status: "cleared" },
-      orderBy: { consideration_date: "asc" }
+    const allReceipts = await tx.customer_receipts.findMany({
+      where: {
+        sales_order_id: order.id,
+        status: { not: "bounced" }
+      }
     });
+    allReceipts.forEach(r => {
+      baseOutstanding -= Number(r.amount || 0);
+      baseOutstanding -= Number(r.tds_amount || 0);
+    });
+  }
 
-    const prlDemands = await tx.demand_letters.findMany({
+  nonInterestLedgers.forEach(l => {
+    baseOutstanding += Number(l.amount || 0);
+  });
+
+  let totalNewInterest = 0;
+
+  for (const order of salesOrders) {
+    // Fetch all unpaid/active demand letters
+    const demands = await tx.demand_letters.findMany({
       where: {
         sales_order_id: order.id,
         demand_type: { in: ["first", "subsequent_prl"] },
-        status: { notIn: ["paid", "cancelled"] }
+        status: { notIn: ["cancelled"] }
       },
       orderBy: { due_date: "asc" }
     });
 
-    // Process standard schedules
-    for (const schedule of schedules) {
-      // Find if there is a linked demand letter to prevent double calculation (processed in the demand loop below)
-      const linkedDemand = await tx.demand_letters.findFirst({
-        where: { payment_schedule_id: schedule.id }
-      });
-      if (linkedDemand) continue;
+    // Fetch all cleared receipts
+    const receipts = await tx.customer_receipts.findMany({
+      where: {
+        sales_order_id: order.id,
+        status: "cleared"
+      },
+      orderBy: { consideration_date: "asc" }
+    });
 
-      if (!schedule.original_due_date) continue;
-      const dueDate = new Date(schedule.original_due_date);
-      if (dueDate >= today) continue;
+    // Structure demands and receipts for FIFO waterfall
+    const demandsFifo = demands.map(d => ({
+      id: d.id,
+      demand_number: d.demand_number,
+      due_date: d.due_date ? new Date(d.due_date) : null,
+      principal_amount: Number(d.principal_amount),
+      remaining_principal: Number(d.principal_amount),
+      payment_schedule_id: d.payment_schedule_id,
+      payments: []
+    }));
 
-      const matchedReceipt = receipts.find(r => r.payment_schedule_id === schedule.id);
-      const endDate = matchedReceipt && matchedReceipt.consideration_date
-        ? new Date(matchedReceipt.consideration_date)
-        : today;
+    const receiptsFifo = receipts.map(r => ({
+      id: r.id,
+      amount: Number(r.amount),
+      remaining_amount: Number(r.amount),
+      consideration_date: r.consideration_date ? new Date(r.consideration_date) : new Date(r.receipt_date)
+    }));
 
-      if (endDate <= dueDate) continue;
+    // Run FIFO allocation waterfall
+    for (const r of receiptsFifo) {
+      for (const d of demandsFifo) {
+        if (r.remaining_amount <= 0) break;
+        if (!d.due_date) continue;
+        if (d.remaining_principal <= 0) continue;
 
-      await postDelayedInterestToLedger(tx, {
-        salesOrderId: order.id,
-        customerId: customerId,
-        milestoneDemand: Number(schedule.due_amount),
-        amountPaid: 0,
-        dueDate: dueDate,
-        calculationEndDate: endDate,
-        annual_interest_rate: 18,
-        milestoneName: schedule.milestone_name,
-        isFinalSettlement: false
-      });
+        const allocated = Math.min(r.remaining_amount, d.remaining_principal);
+        d.payments.push({
+          amount: allocated,
+          date: r.consideration_date
+        });
+        d.remaining_principal -= allocated;
+        r.remaining_amount -= allocated;
+      }
     }
 
-    // Process PRL demands
-    for (const demand of prlDemands) {
-      if (!demand.due_date) continue;
-      const dueDate = new Date(demand.due_date);
+    // Process demands to calculate and post delayed interest
+    for (const d of demandsFifo) {
+      if (!d.due_date) continue;
+      const dueDate = d.due_date;
       if (dueDate >= today) continue;
 
-      const matchedReceipt = demand.payment_schedule_id
-        ? receipts.find(r => r.payment_schedule_id === demand.payment_schedule_id)
-        : null;
-      const endDate = matchedReceipt && matchedReceipt.consideration_date
-        ? new Date(matchedReceipt.consideration_date)
-        : today;
+      // Determine calculation end date
+      const isFullyPaid = d.remaining_principal === 0;
+      const lastPayment = d.payments.length > 0 ? d.payments[d.payments.length - 1] : null;
+      const endDate = isFullyPaid && lastPayment ? lastPayment.date : today;
 
+      // Calculate initial overdue principal before due_date has passed
+      let overduePrincipal = d.principal_amount;
+      const latePayments = [];
+
+      for (const p of d.payments) {
+        if (p.date <= dueDate) {
+          overduePrincipal -= p.amount;
+        } else {
+          latePayments.push(p);
+        }
+      }
+
+      if (overduePrincipal <= 0) continue;
       if (endDate <= dueDate) continue;
 
+      // Post the late interest to ledger month by month
+      let currentOverduePrincipal = overduePrincipal;
+      const startUtc = parseDateToUtc(dueDate);
+      const endUtc = parseDateToUtc(endDate);
+
+      if (startUtc >= endUtc) {
+        continue;
+      }
+
+      const overdueStart = new Date(startUtc.getTime() + 24 * 60 * 60 * 1000);
+      const overdueEnd = endUtc;
+
+      let currentYear = overdueStart.getUTCFullYear();
+      let currentMonth = overdueStart.getUTCMonth();
+      const endYear = overdueEnd.getUTCFullYear();
+      const endMonth = overdueEnd.getUTCMonth();
+
+      const monthlyEntriesToCreate = [];
+
+      while (
+        currentYear < endYear ||
+        (currentYear === endYear && currentMonth <= endMonth)
+      ) {
+        const firstDayOfMonth = new Date(Date.UTC(currentYear, currentMonth, 1));
+        const lastDayOfMonth = new Date(Date.UTC(currentYear, currentMonth + 1, 0));
+
+        const rangeStart = overdueStart > firstDayOfMonth ? overdueStart : firstDayOfMonth;
+        const rangeEnd = overdueEnd < lastDayOfMonth ? overdueEnd : lastDayOfMonth;
+
+        if (rangeStart <= rangeEnd) {
+          const timeDiff = rangeEnd.getTime() - rangeStart.getTime();
+          const daysOverdue = Math.round(timeDiff / (1000 * 60 * 60 * 24)) + 1;
+
+          // Find any payments made during this month range to calculate interest pro-rata
+          const monthLatePayments = latePayments.filter(p => p.date >= rangeStart && p.date <= rangeEnd)
+            .sort((a, b) => a.date - b.date);
+
+          let monthInterest = 0;
+          let tempDate = rangeStart;
+          let tempPrincipal = currentOverduePrincipal;
+
+          for (const lp of monthLatePayments) {
+            const chunkDays = Math.round((lp.date.getTime() - tempDate.getTime()) / (1000 * 60 * 60 * 24));
+            if (chunkDays > 0) {
+              monthInterest += (tempPrincipal * 18 * chunkDays) / (365 * 100);
+            }
+            tempPrincipal -= lp.amount;
+            tempDate = new Date(lp.date.getTime() + 24 * 60 * 60 * 1000);
+          }
+
+          const remainingDays = Math.round((rangeEnd.getTime() - tempDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          if (remainingDays > 0 && tempPrincipal > 0) {
+            monthInterest += (tempPrincipal * 18 * remainingDays) / (365 * 100);
+          }
+
+          for (const lp of monthLatePayments) {
+            currentOverduePrincipal -= lp.amount;
+          }
+
+          const roundedInterest = Math.round((monthInterest + Number.EPSILON) * 100) / 100;
+          const gstAmount = Math.round((roundedInterest * 0.18 + Number.EPSILON) * 100) / 100;
+          const totalAmount = Math.round((roundedInterest + gstAmount + Number.EPSILON) * 100) / 100;
+
+          if (totalAmount > 0) {
+            const isLastDay = isUtcLastDayOfMonth(rangeEnd);
+            const isFinalSettlement = rangeEnd.getTime() === endUtc.getTime();
+
+            if (isLastDay || isFinalSettlement) {
+              monthlyEntriesToCreate.push({
+                rangeStart,
+                rangeEnd,
+                daysOverdue,
+                roundedInterest,
+                gstAmount,
+                totalAmount
+              });
+            }
+          }
+        }
+
+        if (currentMonth === 11) {
+          currentMonth = 0;
+          currentYear += 1;
+        } else {
+          currentMonth += 1;
+        }
+      }
+
       let milestoneName = "";
-      if (demand.payment_schedule_id) {
+      if (d.payment_schedule_id) {
         const sched = await tx.payment_schedules.findUnique({
-          where: { id: demand.payment_schedule_id }
+          where: { id: d.payment_schedule_id }
         });
         if (sched) {
           milestoneName = sched.milestone_name;
         }
       }
       if (!milestoneName) {
-        milestoneName = `PRL Demand - ${demand.demand_number}`;
+        milestoneName = `PRL Demand - ${d.demand_number}`;
       }
 
-      await postDelayedInterestToLedger(tx, {
-        salesOrderId: order.id,
-        customerId: customerId,
-        milestoneDemand: Number(demand.principal_amount),
-        amountPaid: 0,
-        dueDate: dueDate,
-        calculationEndDate: endDate,
-        annual_interest_rate: 18,
-        milestoneName: milestoneName,
-        isFinalSettlement: false
-      });
+      // Create new correct entries
+      for (const item of monthlyEntriesToCreate) {
+        const description = `Delayed payment interest for ${milestoneName} [Ref: ${d.demand_number}] for the period of ${formatUtcDMY(item.rangeStart)} to ${formatUtcDMY(item.rangeEnd)}`;
+
+        await tx.ledger.create({
+          data: {
+            sales_order_id: order.id,
+            customer_id: customerId,
+            transaction_type: "LATE_FEE_INTEREST",
+            amount: item.totalAmount,
+            reference_date: item.rangeEnd,
+            description: description,
+            status: "UNPAID"
+          }
+        });
+
+        totalNewInterest += item.totalAmount;
+      }
     }
   }
+
+  // 4. Update the customer's total outstanding balance with the mathematically correct values
+  const finalBalance = baseOutstanding + totalNewInterest;
+  await tx.customers.update({
+    where: { id: customerId },
+    data: {
+      total_outstanding_balance: finalBalance
+    }
+  });
 }

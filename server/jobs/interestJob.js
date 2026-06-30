@@ -108,6 +108,8 @@ export function startInterestJob() {
               const matchedReceipt = demand.payment_schedule_id
                 ? receipts.find(r => r.payment_schedule_id === demand.payment_schedule_id)
                 : null;
+
+
               const endDate = matchedReceipt && matchedReceipt.consideration_date
                 ? new Date(matchedReceipt.consideration_date)
                 : today;

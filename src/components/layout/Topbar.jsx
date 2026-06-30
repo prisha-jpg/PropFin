@@ -18,6 +18,7 @@ const pageTitles = {
   "/demand-letters": "View Demand Letters",
   "/receipts": "Customer Payment Journal",
   "/reports/ledger": "CRM Ledger Report",
+  "/reports/crm-ledger": "CRM Ledger Report",
   "/reports/interest": "CRM Ledger Interest Report",
   "/reports/sales-receipt": "Sales Receipt Report",
   "/reports/outstanding": "Outstanding Report",

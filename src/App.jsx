@@ -22,7 +22,7 @@ import PaymentJournal from "@/pages/receipts/PaymentJournal";
 import PresalesHub from "@/pages/presales/PresalesHub";
 
 // Reports
-import LedgerReport from "@/pages/reports/LedgerReport";
+import CrmLedgerReport from "@/pages/reports/CrmLedgerReport";
 import InterestReport from "@/pages/reports/InterestReport";
 import SalesReceiptReport from "@/pages/reports/SalesReceiptReport";
 import OutstandingReport from "@/pages/reports/OutstandingReport";
@@ -93,7 +93,8 @@ function AuthenticatedApp() {
         <Route path="/receipts" element={<PaymentJournal />} />
         
         {/* Reports */}
-        <Route path="/reports/ledger" element={<LedgerReport />} />
+        <Route path="/reports/ledger" element={<CrmLedgerReport />} />
+        <Route path="/reports/crm-ledger" element={<CrmLedgerReport />} />
         <Route path="/reports/interest" element={<InterestReport />} />
         <Route path="/reports/sales-receipt" element={<SalesReceiptReport />} />
         <Route path="/reports/outstanding" element={<OutstandingReport />} />
