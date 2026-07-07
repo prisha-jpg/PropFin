@@ -20,6 +20,7 @@ export default function Bookings() {
     { header: "Project", accessor: "project_name" },
     { header: "Unit", accessor: "unit_number" },
     { header: "Type", accessor: "unit_type", cell: r => r.unit_type || "—" },
+    { header: "Agreement Value", accessor: "agreement_value", cell: r => <span className="font-medium text-slate-700">₹{Number(r.agreement_value || r.basic_sale_value || 0).toLocaleString()}</span> },
     { header: "Booking Date", accessor: "booking_date", cell: r => r.booking_date ? format(new Date(r.booking_date), "dd MMM yyyy") : "—" },
     { header: "Value", accessor: "total_value", cell: r => `₹${(r.total_value || 0).toLocaleString()}` },
     { header: "Status", accessor: "status", cell: r => <StatusBadge status={r.status} /> },

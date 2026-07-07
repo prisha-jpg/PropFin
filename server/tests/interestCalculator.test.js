@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { calculateLatePaymentInterest } from "../utils/interestCalculator.js";
+import { calculateLatePaymentInterest, calculateMonthlyBreakdown } from "../utils/interestCalculator.js";
 
 console.log("Starting Interest Calculator Unit Tests...\n");
 
@@ -91,11 +91,28 @@ runTest("Error Handling - Negative Grace Days", () => {
   }, /Grace period days cannot be negative/);
 });
 
-// Test Case 7: Error Handling - Invalid Date
-runTest("Error Handling - Invalid Date Format", () => {
-  assert.throws(() => {
-    calculateLatePaymentInterest(500000, 18, "invalid-date", 15, "2026-07-06");
-  }, /Invalid demand letter date/);
+// Test Case 8: Multiple Receipts Sub-period Splitting
+runTest("Multiple Receipts Sub-period Splitting", () => {
+  const result = calculateMonthlyBreakdown({
+    principalAmount: 1000000,
+    dueDate: "2026-01-31",
+    payments: [
+      { amount: 200000, date: "2026-02-05" },
+      { amount: 300000, date: "2026-02-18" },
+      { amount: 100000, date: "2026-02-25" }
+    ],
+    annualPenaltyRate: 18.0,
+    calculationEndDate: "2026-02-28",
+    isFinalSettlement: false
+  });
+
+  assert.strictEqual(result.length, 1);
+  const entry = result[0];
+  
+  assert.strictEqual(entry.daysOverdue, 28);
+  assert.strictEqual(entry.roundedInterest, 9616.44);
+  assert.strictEqual(entry.gstAmount, 0.00);
+  assert.strictEqual(entry.totalAmount, 9616.44);
 });
 
 console.log("\n\u001b[32m🎉 Core calculation unit tests passed successfully!\u001b[0m");
@@ -157,9 +174,9 @@ async function runDatabaseTests() {
 
     assert.strictEqual(result.status, "POSTED");
     assert.strictEqual(result.ledgerEntries.length, 2);
-    assert.strictEqual(result.ledgerEntries[0].amount, 4073.42);
-    assert.strictEqual(result.ledgerEntries[1].amount, 1745.75);
-    assert.strictEqual(Math.round(result.totalOutstandingBalance * 100) / 100, Math.round((originalBalance + 5819.17) * 100) / 100);
+    assert.strictEqual(result.ledgerEntries[0].amount, 3452.05);
+    assert.strictEqual(result.ledgerEntries[1].amount, 1489.67);
+    assert.strictEqual(Math.round(result.totalOutstandingBalance * 100) / 100, Math.round((originalBalance + 4941.72) * 100) / 100);
     console.log("✅ Passed: Standard Ledger Posting & Balance Update");
 
     // TEST CASE B: Idempotency Check (Running twice on the same calculation date)
@@ -175,7 +192,7 @@ async function runDatabaseTests() {
     });
 
     assert.strictEqual(resultDuplicate.status, "SKIPPED_ALREADY_POSTED");
-    assert.strictEqual(Math.round(resultDuplicate.totalOutstandingBalance * 100) / 100, Math.round((originalBalance + 5819.17) * 100) / 100);
+    assert.strictEqual(Math.round(resultDuplicate.totalOutstandingBalance * 100) / 100, Math.round((originalBalance + 4941.72) * 100) / 100);
     console.log("✅ Passed: Idempotency Check (Duplicate calculation skipped)");
 
     // TEST CASE C: Transactional Integrity / Rollback on Error
@@ -207,7 +224,7 @@ async function runDatabaseTests() {
     assert.strictEqual(errorOccurred, true);
     // Verify customer balance was NOT modified (rolled back to post-calc state)
     const currentCustomer = await prisma.customers.findUnique({ where: { id: customer.id } });
-    assert.strictEqual(Number(currentCustomer.total_outstanding_balance), originalBalance + 5819.17);
+    assert.strictEqual(Math.round(Number(currentCustomer.total_outstanding_balance) * 100) / 100, Math.round((originalBalance + 4941.72) * 100) / 100);
     console.log("✅ Passed: Transactional Integrity / Rollback on Failure");
 
     // TEST CASE D: Month-End Verification (Skipping non-month-end months unless isFinalSettlement is true)

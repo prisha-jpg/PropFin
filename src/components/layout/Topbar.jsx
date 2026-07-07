@@ -32,21 +32,14 @@ const pageTitles = {
   "/resale": "Resale Request",
   "/bank-documents/generate": "Generate Bank Documents",
   "/bank-documents/inquiry": "Bank Document Inquiry",
-  "/tds/generate": "Generate Client TDS",
-  "/tds/view": "View Client TDS",
   "/reminders/generate": "Generate Payment Reminder",
   "/reminders/inquiry": "Reminder Inquiry",
-  "/interest/settlement": "Interest Settlement",
-  "/interest/calculation": "Interest Calculation",
-  "/interest/summary": "Interest Generation Summary",
   "/interest/fpv": "FPV Calculation",
-  "/agreements": "Agreement Details",
-  "/waiver/request": "Interest Waiver Request",
-  "/waiver/types": "Waiver Types",
   "/setup/document-checklist": "Document Checklist Master",
   "/setup/demand-numbers": "Project Wise Demand Number",
   "/setup/bank-master": "Bank Master",
-  "/setup/tds-account": "TDS Account Setup"
+  "/setup/tds-account": "TDS Account Setup",
+  "/setup/settings": "System Settings"
 };
 
 export default function Topbar({ onMenuClick }) {

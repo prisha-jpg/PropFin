@@ -15,6 +15,7 @@ export default function CrmLedgerReport() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [ledgerData, setLedgerData] = useState([]);
   const [summaryInfo, setSummaryInfo] = useState(null);
+  const [ledgerResponse, setLedgerResponse] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [filterType, setFilterType] = useState("ALL");
@@ -94,6 +95,7 @@ export default function CrmLedgerReport() {
     } else {
       setLedgerData([]);
       setSummaryInfo(null);
+      setLedgerResponse(null);
     }
   }, [selectedCustomer]);
 
@@ -156,6 +158,7 @@ export default function CrmLedgerReport() {
       const res = await axios.get(`/api/pricing/ledger/${unitId}?as_of_date=${todayStr}`);
       
       const data = res.data;
+      setLedgerResponse(data);
       setLedgerData(data.ledger_entries || []);
       
       if (selectedCustomer) {
@@ -467,15 +470,23 @@ export default function CrmLedgerReport() {
           );
         }
         
+        const transactionType = params.data.transactionType || params.data.transaction_type || "ADJUSTMENT";
         const typeColors = {
-          Installment: "bg-blue-50 text-blue-800 border-blue-200",
-          Tax: "bg-purple-50 text-purple-800 border-purple-200",
-          Receipt: "bg-emerald-50 text-emerald-800 border-emerald-200",
-          Adjustment: "bg-amber-50 text-amber-800 border-amber-200",
-          Interest: "bg-rose-50 text-rose-800 border-rose-200",
-          TDS: "bg-indigo-50 text-indigo-800 border-indigo-200",
+          MILESTONE: "bg-blue-50 text-blue-800 border-blue-200",
+          GST: "bg-purple-50 text-purple-800 border-purple-200",
+          RECEIPT: "bg-emerald-50 text-emerald-800 border-emerald-200",
+          RECEIPT_REVERSAL: "bg-orange-50 text-orange-800 border-orange-200",
+          INTEREST: "bg-red-50 text-red-800 border-red-200",
+          PENALTY: "bg-rose-100 text-rose-900 border-rose-300",
+          REFUND: "bg-emerald-100 text-emerald-800 border-emerald-300",
+          CANCELLATION_CHARGE: "bg-yellow-50 text-yellow-800 border-yellow-200",
+          CANCELLATION_GST: "bg-amber-50 text-amber-800 border-amber-200",
+          DEMAND_REVERSAL: "bg-slate-100 text-slate-800 border-slate-300",
+          GST_REVERSAL: "bg-violet-50 text-violet-800 border-violet-200",
+          WRITE_OFF: "bg-neutral-900 text-neutral-50 border-neutral-800",
+          ADJUSTMENT: "bg-teal-50 text-teal-800 border-teal-200"
         };
-        const colorClass = typeColors[params.value] || "bg-slate-50 text-slate-800 border-slate-200";
+        const colorClass = typeColors[transactionType.toUpperCase()] || "bg-slate-50 text-slate-800 border-slate-200";
         return (
           <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${colorClass}`}>
             {params.value}
@@ -484,13 +495,15 @@ export default function CrmLedgerReport() {
       },
     },
     {
-      headerName: "Consideration Date",
-      field: "consideration_date",
-      valueFormatter: dateFormatter,
+      headerName: "Reference Number",
+      field: "referenceNo",
       sortable: true,
       filter: true,
-      flex: 1.1,
-      minWidth: 150,
+      flex: 1,
+      minWidth: 120,
+      cellRenderer: (params) => {
+        return params.value ? `Ref: ${params.value}` : "-";
+      }
     },
     {
       headerName: "Narration",
@@ -523,7 +536,7 @@ export default function CrmLedgerReport() {
       cellClass: "font-mono text-right text-emerald-600",
     },
     {
-      headerName: "Net Amount",
+      headerName: "Running Balance",
       field: "net_balance",
       valueFormatter: currencyFormatter,
       type: "numericColumn",
@@ -832,13 +845,107 @@ export default function CrmLedgerReport() {
         {/* Outstanding Balance Card */}
         <div className="bg-white p-5 rounded-xl border border-primary/30 bg-primary/[0.015] shadow-sm flex flex-col justify-between">
           <div>
-            <span className="text-[10px] font-bold uppercase text-primary tracking-wider block">Outstanding Balance</span>
-            <h3 className="text-lg font-black mt-1 text-primary">
-              {summaryInfo ? currencyFormatter({ value: summaryInfo.outstandingBalance, colDef: { field: "net_balance" } }) : "-"}
+            <span className="text-[10px] font-bold uppercase text-primary tracking-wider block">
+              {ledgerResponse?.order_status === "cancelled" ? "Cancellation Net Payable" : "Outstanding Balance"}
+            </span>
+            <h3 className={`text-lg font-black mt-1 ${ledgerResponse?.order_status === "cancelled" ? "text-amber-700" : "text-primary"}`}>
+              {summaryInfo ? (
+                ledgerResponse?.order_status === "cancelled" ? (
+                  <>
+                    INR {Math.abs(ledgerResponse.net_payable || 0).toLocaleString()}
+                    <span className="text-[10px] font-bold block mt-1 uppercase text-slate-500">
+                      {ledgerResponse.net_payable > 0 ? "Net Payable to Customer" : ledgerResponse.net_payable < 0 ? "Net Payable by Customer" : "No Amount Payable"}
+                    </span>
+                  </>
+                ) : (
+                  currencyFormatter({ value: summaryInfo.outstandingBalance, colDef: { field: "net_balance" } })
+                )
+              ) : "-"}
             </h3>
           </div>
         </div>
       </div>
+
+      {/* Cancellation Settlement Statement */}
+      {selectedCustomer && ledgerResponse?.order_status === "cancelled" && (
+        <div className="bg-gradient-to-br from-red-50 to-amber-50 border border-amber-200 rounded-xl p-5 mb-6 shadow-sm">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-amber-200 pb-4 mb-4 gap-3">
+            <div>
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-200 uppercase tracking-wide">
+                Booking Cancelled
+              </span>
+              <h2 className="text-lg font-black text-slate-800 mt-2">Cancellation Settlement Statement</h2>
+            </div>
+            <div className="text-right">
+              <span className="text-xs text-muted-foreground uppercase tracking-wider block font-semibold">Settlement Status</span>
+              <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold border mt-1 shadow-sm uppercase ${
+                ledgerResponse.settlement_status === "Refund Pending"
+                  ? "bg-amber-100 text-amber-800 border-amber-300 animate-pulse"
+                  : ledgerResponse.settlement_status === "Refund Approved"
+                  ? "bg-blue-100 text-blue-800 border-blue-300"
+                  : ledgerResponse.settlement_status === "Settlement Completed" || ledgerResponse.settlement_status === "Fully Settled"
+                  ? "bg-emerald-100 text-emerald-800 border-emerald-300 font-extrabold"
+                  : ledgerResponse.settlement_status === "Payable by Customer"
+                  ? "bg-rose-100 text-rose-800 border-rose-300"
+                  : "bg-slate-100 text-slate-800 border-slate-300"
+              }`}>
+                {ledgerResponse.settlement_status}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <div className="bg-white p-3 rounded-lg border border-slate-200">
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Amount Received</p>
+              <p className="text-base font-extrabold text-emerald-600 mt-1">
+                INR {ledgerResponse.total_receipts?.toLocaleString() ?? "0"}
+              </p>
+            </div>
+            <div className="bg-white p-3 rounded-lg border border-slate-200">
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Milestone Principal Reversed</p>
+              <p className="text-base font-extrabold text-blue-600 mt-1">
+                INR {ledgerResponse.milestone_principal_reversed?.toLocaleString() ?? "0"}
+              </p>
+            </div>
+            <div className="bg-white p-3 rounded-lg border border-slate-200">
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Interest Retained</p>
+              <p className="text-base font-extrabold text-amber-700 mt-1">
+                INR {ledgerResponse.total_interest?.toLocaleString() ?? "0"}
+              </p>
+            </div>
+            <div className="bg-white p-3 rounded-lg border border-slate-200">
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cancellation Fee (0.5%)</p>
+              <p className="text-base font-extrabold text-red-600 mt-1">
+                INR {ledgerResponse.cancellation_charges?.toLocaleString() ?? "0"}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 border-t border-amber-200 pt-4">
+            <div className="bg-white p-3 rounded-lg border border-slate-200">
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Other Recoverable Charges</p>
+              <p className="text-base font-extrabold text-red-700 mt-1">
+                INR {ledgerResponse.cancellation_gst?.toLocaleString() ?? "0"}
+              </p>
+            </div>
+            <div className="bg-white p-3 rounded-lg border border-slate-200">
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Recoveries</p>
+              <p className="text-base font-extrabold text-slate-700 mt-1">
+                INR {ledgerResponse.total_recoveries?.toLocaleString() ?? "0"}
+              </p>
+            </div>
+            <div className="bg-amber-100/70 p-3 rounded-lg border border-amber-300">
+              <p className="text-[11px] font-bold text-amber-900 uppercase tracking-wider">Net Payable</p>
+              <p className="text-base font-black text-amber-900 mt-1">
+                INR {Math.abs(ledgerResponse.net_payable || 0).toLocaleString()}
+                <span className="text-xs font-semibold block mt-0.5">
+                  {ledgerResponse.net_payable > 0 ? "Net Payable to Customer" : ledgerResponse.net_payable < 0 ? "Net Payable by Customer" : "No Amount Payable"}
+                </span>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filter and Grid Content */}
       {selectedCustomer ? (

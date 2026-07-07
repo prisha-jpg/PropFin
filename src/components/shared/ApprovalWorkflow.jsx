@@ -4,8 +4,8 @@ import { CheckCircle2, Clock, XCircle, Eye } from "lucide-react";
 
 const steps = [
   { key: "pending", label: "Pending", icon: Clock },
-  { key: "under_review", label: "Under Review", icon: Eye },
-  { key: "approved", label: "Approved", icon: CheckCircle2 },
+  { key: "finance_review", label: "Finance Review", icon: Eye },
+  { key: "management_approval", label: "Approved", icon: CheckCircle2 },
 ];
 
 export default function ApprovalWorkflow({ status }) {

@@ -653,6 +653,7 @@ model refund_requests {
   created_at                                       DateTime               @default(now()) @db.Timestamptz(6)
   updated_at                                       DateTime               @default(now()) @db.Timestamptz(6)
   created_by                                       String?                @db.Uuid
+  journal_voucher_no                               String?                @db.VarChar(50)
   users_refund_requests_approved_byTousers         users?                 @relation("refund_requests_approved_byTousers", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   bank_master                                      bank_master?           @relation(fields: [bank_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   cancellation_requests                            cancellation_requests? @relation(fields: [cancellation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -776,6 +777,8 @@ model shifting_requests {
   floor_difference                                     Int?
   additional_amount_payable                            Decimal      @default(0) @db.Decimal(15, 2)
   status                                               String       @default("pending") @db.VarChar(30)
+  old_agreement_value                                  Decimal?     @db.Decimal(15, 2)
+  new_agreement_value                                  Decimal?     @db.Decimal(15, 2)
   requested_by                                         String?      @db.Uuid
   approved_by                                          String?      @db.Uuid
   approval_date                                        DateTime?    @db.Date
@@ -983,18 +986,30 @@ model quotations {
 }
 
 model ledger {
-  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  sales_order_id   String   @db.Uuid
-  customer_id      String   @db.Uuid
-  transaction_type String   @db.VarChar(50)
-  amount           Decimal  @db.Decimal(15, 2)
-  reference_date   DateTime @db.Date
-  description      String
-  status           String   @default("UNPAID") @db.VarChar(20)
-  created_at       DateTime @default(now()) @db.Timestamptz(6)
-  updated_at       DateTime @default(now()) @db.Timestamptz(6)
-  sales_orders     sales_orders @relation(fields: [sales_order_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  customers        customers    @relation(fields: [customer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id                         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sales_order_id             String   @db.Uuid
+  customer_id                String   @db.Uuid
+  transaction_type           String   @db.VarChar(50)
+  amount                     Decimal  @db.Decimal(15, 2)
+  reference_date             DateTime @db.Date
+  description                String
+  status                     String   @default("UNPAID") @db.VarChar(20)
+  ledger_reference_type      String?  @db.VarChar(50)
+  ledger_reference_id        String?  @db.Uuid
+  cancellation_request_id    String?  @db.Uuid
+  financial_snapshot_version Int?     @default(1)
+  created_at                 DateTime @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime @default(now()) @db.Timestamptz(6)
+  
+  reference_no               String?  @db.VarChar(50)
+  debit                      Decimal? @db.Decimal(15, 2)
+  credit                     Decimal? @db.Decimal(15, 2)
+  running_balance            Decimal? @db.Decimal(15, 2)
+  created_by                 String?  @db.Uuid
+  journal_voucher_no         String?  @db.VarChar(50)
+
+  sales_orders               sales_orders @relation(fields: [sales_order_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  customers                  customers    @relation(fields: [customer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 }
 
 

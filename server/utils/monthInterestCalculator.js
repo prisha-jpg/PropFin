@@ -81,10 +81,12 @@ export function calculateMonthlyDelayedInterest({
   const endYear = overdueEnd.getUTCFullYear();
   const endMonth = overdueEnd.getUTCMonth();
 
+  let runningOutstanding = principal;
+
   // Loop through calendar months starting from overdueStart's month up to overdueEnd's month
   while (
-    currentYear < endYear || 
-    (currentYear === endYear && currentMonth <= endMonth)
+    (currentYear < endYear || (currentYear === endYear && currentMonth <= endMonth)) &&
+    runningOutstanding > 0
   ) {
     const firstDayOfMonth = new Date(Date.UTC(currentYear, currentMonth, 1));
     const lastDayOfMonth = new Date(Date.UTC(currentYear, currentMonth + 1, 0));
@@ -102,21 +104,24 @@ export function calculateMonthlyDelayedInterest({
       const daysInYear = isLeapYear(currentYear) ? 366 : 365;
 
       // Simple Interest formula: P * R * T
-      const interestCalculated = (principal * rate * daysOverdue) / (daysInYear * 100);
+      const interestCalculated = (runningOutstanding * rate * daysOverdue) / (daysInYear * 100);
       const roundedInterest = Math.round((interestCalculated + Number.EPSILON) * 100) / 100;
 
       const monthStr = (currentMonth + 1).toString().padStart(2, '0');
       const monthYear = `${monthStr}-${currentYear}`;
 
-      const narration = `Delayed payment interest for the period of ${formatUtcDMY(rangeStart)} to ${formatUtcDMY(rangeEnd)}`;
+      const narration = `Delayed payment interest for the period of ${formatUtcDMY(rangeStart)} to ${formatUtcDMY(rangeEnd)} (${daysOverdue} days)`;
 
       results.push({
         monthYear,
         daysOverdue,
-        principalAmount: Number(principal.toFixed(2)),
+        principalAmount: Number(runningOutstanding.toFixed(2)),
         interestAmount: roundedInterest,
         narration
       });
+
+      // Update runningOutstanding for the next month
+      runningOutstanding = runningOutstanding + roundedInterest;
     }
 
     // Move to next calendar month

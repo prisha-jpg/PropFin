@@ -56,7 +56,8 @@ const menuGroups = [
       { label: "Interest Report", path: "/reports/interest", icon: Percent },
       { label: "Sales Receipt Report", path: "/reports/sales-receipt", icon: Receipt },
       { label: "Outstanding Report", path: "/reports/outstanding", icon: DollarSign },
-      { label: "Provisional Statement", path: "/reports/provisional", icon: FileText }
+      { label: "Provisional Statement", path: "/reports/provisional", icon: FileText },
+      { label: "FPV Calculation", path: "/interest/fpv", icon: Calculator }
     ]
   },
   {
@@ -105,38 +106,11 @@ const menuGroups = [
     ]
   },
   {
-    label: "Client TDS",
-    icon: Receipt,
-    items: [
-      { label: "Generate TDS", path: "/tds/generate", icon: Receipt },
-      { label: "View TDS", path: "/tds/view", icon: Receipt }
-    ]
-  },
-  {
     label: "Payment Reminders",
     icon: Mail,
     items: [
       { label: "Generate Reminder", path: "/reminders/generate", icon: Mail },
       { label: "Reminder Inquiry", path: "/reminders/inquiry", icon: Mail }
-    ]
-  },
-  {
-    label: "Interest",
-    icon: TrendingUp,
-    items: [
-      { label: "Interest Settlement", path: "/interest/settlement", icon: Percent },
-      { label: "Interest Calculation", path: "/interest/calculation", icon: Calculator },
-      { label: "Interest Summary", path: "/interest/summary", icon: TrendingUp },
-      { label: "FPV Calculation", path: "/interest/fpv", icon: Calculator }
-    ]
-  },
-  {
-    label: "Other Processes",
-    icon: Settings,
-    items: [
-      { label: "Agreement Details", path: "/agreements", icon: FileText },
-      { label: "Interest Waiver", path: "/waiver/request", icon: Percent },
-      { label: "Waiver Types", path: "/waiver/types", icon: Settings }
     ]
   },
   {
@@ -146,7 +120,8 @@ const menuGroups = [
       { label: "Document Checklist", path: "/setup/document-checklist", icon: FileCheck },
       { label: "Project Demand Numbers", path: "/setup/demand-numbers", icon: FileText },
       { label: "Bank Master", path: "/setup/bank-master", icon: Landmark },
-      { label: "TDS Account Setup", path: "/setup/tds-account", icon: Receipt }
+      { label: "TDS Account Setup", path: "/setup/tds-account", icon: Receipt },
+      { label: "System Settings", path: "/setup/settings", icon: Settings }
     ]
   }
 ];

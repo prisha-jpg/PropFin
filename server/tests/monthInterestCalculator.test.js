@@ -82,19 +82,19 @@ runTest("Standard Multi-Month Overdue Period (Non-Leap Year)", () => {
   assert.strictEqual(result[0].monthYear, "01-2026");
   assert.strictEqual(result[0].daysOverdue, 3);
   assert.strictEqual(result[0].interestAmount, 739.73);
-  assert.strictEqual(result[0].narration, "Delayed payment interest for the period of 29/01/2026 to 31/01/2026");
+  assert.strictEqual(result[0].narration, "Delayed payment interest for the period of 29/01/2026 to 31/01/2026 (3 days)");
 
   // February 2026
   assert.strictEqual(result[1].monthYear, "02-2026");
   assert.strictEqual(result[1].daysOverdue, 28);
-  assert.strictEqual(result[1].interestAmount, 6904.11);
-  assert.strictEqual(result[1].narration, "Delayed payment interest for the period of 01/02/2026 to 28/02/2026");
+  assert.strictEqual(result[1].interestAmount, 6914.32);
+  assert.strictEqual(result[1].narration, "Delayed payment interest for the period of 01/02/2026 to 28/02/2026 (28 days)");
 
   // March 2026
   assert.strictEqual(result[2].monthYear, "03-2026");
   assert.strictEqual(result[2].daysOverdue, 5);
-  assert.strictEqual(result[2].interestAmount, 1232.88);
-  assert.strictEqual(result[2].narration, "Delayed payment interest for the period of 01/03/2026 to 05/03/2026");
+  assert.strictEqual(result[2].interestAmount, 1251.75);
+  assert.strictEqual(result[2].narration, "Delayed payment interest for the period of 01/03/2026 to 05/03/2026 (5 days)");
 });
 
 // 6. Leap Year Case: Dynamic leap year day check (2024 is a leap year, Feb has 29 days, total is 366)
@@ -113,13 +113,13 @@ runTest("Leap Year Calculation Adjustments (Leap Year 2024)", () => {
   assert.strictEqual(result[0].monthYear, "02-2024");
   assert.strictEqual(result[0].daysOverdue, 14); // Feb 16 to Feb 29 inclusive
   assert.strictEqual(result[0].interestAmount, 3442.62); // (500000 * 18 * 14) / (366 * 100) = 3442.62
-  assert.strictEqual(result[0].narration, "Delayed payment interest for the period of 16/02/2024 to 29/02/2024");
+  assert.strictEqual(result[0].narration, "Delayed payment interest for the period of 16/02/2024 to 29/02/2024 (14 days)");
 
   // March 2024
   assert.strictEqual(result[1].monthYear, "03-2024");
   assert.strictEqual(result[1].daysOverdue, 5); // Mar 1 to Mar 5 inclusive
-  assert.strictEqual(result[1].interestAmount, 1229.51); // (500000 * 18 * 5) / (366 * 100) = 1229.51
-  assert.strictEqual(result[1].narration, "Delayed payment interest for the period of 01/03/2024 to 05/03/2024");
+  assert.strictEqual(result[1].interestAmount, 1237.97); // (503442.62 * 18 * 5) / (366 * 100) = 1237.973 -> 1237.97
+  assert.strictEqual(result[1].narration, "Delayed payment interest for the period of 01/03/2024 to 05/03/2024 (5 days)");
 });
 
 console.log("\n\u001b[32m🎉 All monthly interest calculation unit tests passed successfully!\u001b[0m");

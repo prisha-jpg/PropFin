@@ -92,25 +92,25 @@ async function runRouteTest() {
     assert.ok(Array.isArray(result.ledger_entries));
     assert.strictEqual(result.ledger_entries.length, 2);
 
-    // Verify values including 18% GST
-    // Month 1 amount (incl GST) should be 8437.8
-    // Month 2 amount (incl GST) should be 1745.75
-    assert.strictEqual(result.ledger_entries[0].amount, 8437.8);
-    assert.strictEqual(result.ledger_entries[1].amount, 1745.75);
+    // Verify values (excluding GST)
+    // Month 1 amount should be 7150.68 (29 days)
+    // Month 2 amount should be 1500.61 (6 days)
+    assert.strictEqual(result.ledger_entries[0].amount, 7150.68);
+    assert.strictEqual(result.ledger_entries[1].amount, 1500.61);
 
     // Verify DB Ledger state
     const dbLedgerEntries = await prisma.ledger.findMany({
       where: { sales_order_id: salesOrder.id }
     });
     assert.strictEqual(dbLedgerEntries.length, 2);
-    assert.strictEqual(Number(dbLedgerEntries[0].amount), 8437.8);
-    assert.strictEqual(Number(dbLedgerEntries[1].amount), 1745.75);
+    assert.strictEqual(Number(dbLedgerEntries[0].amount), 7150.68);
+    assert.strictEqual(Number(dbLedgerEntries[1].amount), 1500.61);
 
     // Verify customer outstanding balance was updated in DB
     const updatedCustomer = await prisma.customers.findUnique({
       where: { id: customer.id }
     });
-    assert.strictEqual(Number(updatedCustomer.total_outstanding_balance), originalBalance + 10183.55);
+    assert.strictEqual(Math.round(Number(updatedCustomer.total_outstanding_balance) * 100) / 100, Math.round((originalBalance + 8651.29) * 100) / 100);
     console.log("✅ Route verification passed successfully!");
 
   } catch (error) {

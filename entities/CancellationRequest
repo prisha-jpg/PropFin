@@ -57,7 +57,10 @@
         "pending",
         "under_review",
         "approved",
-        "rejected"
+        "rejected",
+        "revoked",
+        "completed",
+        "cancelled"
       ],
       "default": "pending",
       "description": "Request status"

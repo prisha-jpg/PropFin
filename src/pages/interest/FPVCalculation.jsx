@@ -1,34 +1,176 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { apiClient } from "@/api/apiClient";
 import PageHeader from "../../components/shared/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Calculator } from "lucide-react";
+import { Calculator, Wand2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+
+// ---------------------------------------------------------------------------
+// Pure utility helpers (no React dependencies)
+// ---------------------------------------------------------------------------
+
+const BILLED_STATUSES = new Set(["raised", "paid", "partially_paid"]);
+
+/**
+ * Normalise DB percentage_of_total: fractions ≤ 1 are multiplied by 100.
+ * e.g.  0.1  → 10     |   10  → 10
+ */
+const normalisePercent = (raw) => {
+  const n = Number(raw ?? 0);
+  return n > 0 && n <= 1 ? n * 100 : n;
+};
+
+/**
+ * Safe calendar-day difference: dueDate − computationDate.
+ *
+ * Both inputs are YYYY-MM-DD strings. We parse them as explicit midnight UTC
+ * (via the "T00:00:00Z" suffix) so that no local timezone or DST shift can
+ * cause an off-by-one error.
+ *
+ * Returns a non-negative integer. If the due date is in the past relative to
+ * the computation date, returns 0 (per the Excel edge-case rule).
+ */
+const calcDaysDiff = (computationDateStr, dueDateStr) => {
+  if (!computationDateStr || !dueDateStr) return 0;
+  const comp = Date.parse(`${computationDateStr}T00:00:00Z`);
+  const due  = Date.parse(`${dueDateStr}T00:00:00Z`);
+  if (isNaN(comp) || isNaN(due)) return 0;
+  const diff = Math.floor((due - comp) / (1000 * 60 * 60 * 24));
+  return Math.max(0, diff);
+};
+
+const formatDueDateValue = (rawDate) => {
+  if (!rawDate) return "";
+  const parsedDate = rawDate instanceof Date ? rawDate : new Date(rawDate);
+  if (Number.isNaN(parsedDate.getTime())) return "";
+  const year = parsedDate.getFullYear();
+  const month = String(parsedDate.getMonth() + 1).padStart(2, "0");
+  const day = String(parsedDate.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+/**
+ * Maps payment_schedules rows into Due Details form rows.
+ * All three values (agreementValue, computationDate) are passed as plain
+ * arguments — never read from React state — so they are guaranteed current.
+ */
+const buildDueRows = (paymentSchedules = [], agreementValue = 0, computationDate = "") =>
+  paymentSchedules.map((ps, i) => {
+    const pct = normalisePercent(ps.percentage_of_total);
+    const rawDate = ps.revised_due_date
+      ?? ps.original_due_date
+      ?? ps.due_date
+      ?? ps.expected_date
+      ?? ps.dueDate
+      ?? ps.expectedDate
+      ?? ps.originalDueDate
+      ?? ps.revisedDueDate
+      ?? ps.schedule_date
+      ?? ps.installment_date
+      ?? "";
+    const dueDate = formatDueDateValue(rawDate);
+    const rowAmount = Math.round((agreementValue * pct) / 100) || 0;
+    const days = calcDaysDiff(computationDate, dueDate);
+    return {
+      id: `due-ps-${ps.id || i}-${Date.now()}`,
+      name: ps.milestone_name || ps.name || "",
+      percent: String(pct),
+      dueDate,
+      rowAmount,
+      days,
+      _status: ps.status || "pending",
+      _isBilled: BILLED_STATUSES.has((ps.status || "").toLowerCase()),
+    };
+  });
 
 export default function FPVCalculation() {
   const [form, setForm] = useState({
     lienName: "",
+    salesOrderId: "",
     computationDate: "",
     bookingDate: "",
-    discountRate: "",
     lateInterestRate: "",
     agreementValue: "",
     computeBasis: "due_date",
     discountType: "payment_before_due",
   });
+
+  const { data: salesOrders = [] } = useQuery({
+    queryKey: ["salesOrders"],
+    queryFn: () => apiClient.entities.SalesOrder.list("-created_date", 500),
+  });
+
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
   const [schedules, setSchedules] = useState([
-    { id: "due-1", name: "", percent: "", dueDate: "" },
+    { id: "due-1", name: "", percent: "", dueDate: "", rowAmount: 0, days: 0, _status: "pending", _isBilled: false },
   ]);
   const [payments, setPayments] = useState([
     { id: "pay-1", reference: "", paymentDate: "", amount: "" },
   ]);
 
+  // ---------------------------------------------------------------------------
+  // Schedule population
+  // ---------------------------------------------------------------------------
+
+  // All three values are passed explicitly — never read from React state —
+  // so the math is guaranteed correct even on the very first render.
+  const populateDueDetails = (order, agreementValue, computationDate) => {
+    const scheduleRows = order?.payment_schedules ?? [];
+    if (scheduleRows.length === 0) {
+      setSchedules([{
+        id: `due-blank-${Date.now()}`, name: "", percent: "",
+        dueDate: "", rowAmount: 0, days: 0,
+        _status: "pending", _isBilled: false,
+      }]);
+      return;
+    }
+
+    if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
+      console.debug("FPV milestone payload", scheduleRows);
+    }
+
+    setSchedules(buildDueRows(scheduleRows, agreementValue, computationDate));
+  };
+
+  // ---------------------------------------------------------------------------
+  // Re-calculate `days` for every row when the global Computation Date changes.
+  // This fires AFTER setForm has committed the new date to state, so
+  // form.computationDate is already the fresh value inside the effect.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!form.computationDate) return;
+    setSchedules((prev) =>
+      prev.map((row) => ({
+        ...row,
+        days: calcDaysDiff(form.computationDate, row.dueDate),
+      }))
+    );
+  }, [form.computationDate]);
+
   const setScheduleField = (id, field, value) => {
-    setSchedules((prev) => prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
+    setSchedules((prev) =>
+      prev.map((row) => {
+        if (row.id !== id) return row;
+        const updated = { ...row, [field]: value };
+        // When % changes, recompute the ₹ amount.
+        if (field === "percent") {
+          const pct = Number(value || 0);
+          const av  = Number(form.agreementValue || 0);
+          updated.rowAmount = Math.round((av * pct) / 100) || 0;
+        }
+        // When dueDate changes, recompute days against the global computation date.
+        if (field === "dueDate") {
+          updated.days = calcDaysDiff(form.computationDate, value);
+        }
+        return updated;
+      })
+    );
   };
 
   const setPaymentField = (id, field, value) => {
@@ -36,7 +178,10 @@ export default function FPVCalculation() {
   };
 
   const addScheduleRow = () => {
-    setSchedules((prev) => [...prev, { id: `due-${Date.now()}`, name: "", percent: "", dueDate: "" }]);
+    setSchedules((prev) => [
+      ...prev,
+      { id: `due-${Date.now()}`, name: "", percent: "", dueDate: "", rowAmount: 0, days: 0, _status: "pending", _isBilled: false },
+    ]);
   };
 
   const removeScheduleRow = (id) => {
@@ -57,7 +202,7 @@ export default function FPVCalculation() {
   const calculate = () => {
     setError("");
     const agreementValue = Number(form.agreementValue || 0);
-    const discountRate = Number(form.discountRate || 0) / 100;
+    const discountRate = 0;
     const lateInterestRate = Number(form.lateInterestRate || 0) / 100;
     const computationDate = toDate(form.computationDate);
     const bookingDate = toDate(form.bookingDate);
@@ -78,6 +223,9 @@ export default function FPVCalculation() {
         ...row,
         dueAmount: (agreementValue * Number(row.percent || 0)) / 100,
         dueDateObj: toDate(row.dueDate),
+        // Use the pre-computed days from state — already clamped ≥ 0 and
+        // timezone-safe. Fall back to live computation if somehow absent.
+        days: row.days ?? calcDaysDiff(form.computationDate, row.dueDate),
         remaining: (agreementValue * Number(row.percent || 0)) / 100,
       }))
       .filter((row) => row.dueAmount > 0);
@@ -189,7 +337,41 @@ export default function FPVCalculation() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-1.5">
               <Label>Lien Name</Label>
-              <Input value={form.lienName} onChange={(e) => setForm((p) => ({ ...p, lienName: e.target.value }))} />
+              <Select
+                value={form.salesOrderId}
+                onValueChange={(value) => {
+                  const order = salesOrders.find((o) => o.id === value);
+                  // Use the actual agreement amount if available, otherwise fallback
+                  // to total_value or basic_sale_value from the sales order payload.
+                  const agreementValue = Number(
+                    order?.agreement_value ?? order?.total_value ?? order?.basic_sale_value ?? 0
+                  );
+                  // Read current computationDate from form state directly — it is
+                  // already committed because we haven't changed it here.
+                  const computationDate = form.computationDate;
+                  setForm((p) => ({
+                    ...p,
+                    salesOrderId: value,
+                    lienName:     order?.customer_name || order?.order_number || "",
+                    agreementValue: agreementValue > 0 ? String(agreementValue) : "",
+                    bookingDate:  order?.booking_date ? order.booking_date.split("T")[0] : p.bookingDate,
+                  }));
+                  populateDueDetails(order, agreementValue, computationDate);
+                  setResult(null);
+                  setError("");
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select sales order…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {salesOrders.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.customer_name || o.order_number} — {o.order_number}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label>Date of Discount Computation</Label>
@@ -208,14 +390,6 @@ export default function FPVCalculation() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Rate of Discount Applicable (% p.a.)</Label>
-              <Input
-                type="number"
-                value={form.discountRate}
-                onChange={(e) => setForm((p) => ({ ...p, discountRate: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1.5">
               <Label>Rate of Interest on Late Payment (% p.a.)</Label>
               <Input
                 type="number"
@@ -224,11 +398,13 @@ export default function FPVCalculation() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Agreement Value Before Discount (₹)</Label>
+              <Label>Agreement Value After Discount (₹)</Label>
               <Input
                 type="number"
                 value={form.agreementValue}
-                onChange={(e) => setForm((p) => ({ ...p, agreementValue: e.target.value }))}
+                readOnly
+                className="bg-muted/50 cursor-not-allowed"
+                placeholder="Auto-filled from sales order"
               />
             </div>
             <div className="space-y-1.5">
@@ -259,16 +435,35 @@ export default function FPVCalculation() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="space-y-3">
-              <h3 className="text-sm font-semibold">Due Details</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold">Due Details</h3>
+                {schedules.some((r) => r._isBilled) && (
+                  <p className="text-xs text-amber-600 flex items-center gap-1">
+                    <Wand2 className="w-3 h-3" />
+                    Auto-populated — billed rows highlighted
+                  </p>
+                )}
+              </div>
               <div className="space-y-2">
                 {schedules.map((row) => (
-                  <div key={row.id} className="grid grid-cols-12 gap-2">
-                    <Input
-                      className="col-span-4"
-                      value={row.name}
-                      onChange={(e) => setScheduleField(row.id, "name", e.target.value)}
-                      placeholder="Schedule"
-                    />
+                  <div
+                    key={row.id}
+                    className={`grid grid-cols-12 gap-2 items-center rounded-md p-1 ${
+                      row._isBilled ? "bg-amber-50 border border-amber-200" : ""
+                    }`}
+                  >
+                    <div className="col-span-4 flex items-center gap-1">
+                      <Input
+                        value={row.name}
+                        onChange={(e) => setScheduleField(row.id, "name", e.target.value)}
+                        placeholder="Schedule"
+                      />
+                      {row._isBilled && (
+                        <Badge variant="outline" className="text-[10px] shrink-0 border-amber-400 text-amber-700 bg-amber-50">
+                          Billed
+                        </Badge>
+                      )}
+                    </div>
                     <Input
                       className="col-span-2"
                       type="number"
@@ -276,15 +471,28 @@ export default function FPVCalculation() {
                       onChange={(e) => setScheduleField(row.id, "percent", e.target.value)}
                       placeholder="%"
                     />
+                    <div className="col-span-3 flex items-center gap-1">
+                      <Input
+                        type="date"
+                        value={row.dueDate || ""}
+                        onChange={(e) => setScheduleField(row.id, "dueDate", e.target.value)}
+                      />
+                      {/* Days delta badge — updates live when either the row due date
+                          or the global computation date changes */}
+                      <span
+                        className={`text-[11px] font-medium shrink-0 px-1.5 py-0.5 rounded border ${
+                          row.days > 0
+                            ? "border-emerald-300 text-emerald-700 bg-emerald-50"
+                            : "border-muted text-muted-foreground bg-muted/30"
+                        }`}
+                        title="Calendar days: Due Date − Computation Date"
+                      >
+                        {row.days ?? 0}d
+                      </span>
+                    </div>
                     <Input
                       className="col-span-3"
-                      type="date"
-                      value={row.dueDate}
-                      onChange={(e) => setScheduleField(row.id, "dueDate", e.target.value)}
-                    />
-                    <Input
-                      className="col-span-3"
-                      value={`₹${Math.round((Number(form.agreementValue || 0) * Number(row.percent || 0)) / 100).toLocaleString()}`}
+                      value={`₹${(row.rowAmount ?? 0).toLocaleString()}`}
                       readOnly
                     />
                     <Button type="button" variant="outline" className="col-span-12 md:col-span-2" onClick={() => removeScheduleRow(row.id)}>
@@ -337,7 +545,7 @@ export default function FPVCalculation() {
             </div>
           </div>
 
-          <Button className="w-full gap-2" onClick={calculate} disabled={!form.agreementValue}>
+          <Button className="w-full gap-2" onClick={calculate} disabled={!form.agreementValue || !form.salesOrderId}>
             <Calculator className="w-4 h-4" /> Compute
           </Button>
           {error && <p className="text-sm text-red-600">{error}</p>}

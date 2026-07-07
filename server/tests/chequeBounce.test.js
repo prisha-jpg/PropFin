@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import assert from "node:assert";
@@ -14,6 +15,8 @@ const generateToken = (payload) => {
 async function testChequeBounce() {
   console.log("Starting Cheque Bounce / Receipt Reversal integration test...");
   const prisma = new PrismaClient();
+  let serverProcess = null;
+  const port = 4013;
 
   let customer = null;
   let salesOrder = null;
@@ -33,6 +36,18 @@ async function testChequeBounce() {
     }
 
     originalBalance = Number(customer.total_outstanding_balance || 0);
+
+    // Start server
+    serverProcess = spawn("node", ["server/index.js"], {
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        API_PORT: String(port)
+      }
+    });
+
+    // Wait for server to start
+    await new Promise((resolve) => setTimeout(resolve, 3000));
 
     // Create transient Sales Order
     salesOrder = await prisma.sales_orders.create({
@@ -62,8 +77,8 @@ async function testChequeBounce() {
 
     const token = generateToken({ id: "admin-id", email: "admin@propfin.com" });
 
-    console.log(`Sending POST to bounce receipt endpoint on port 4001 for Receipt: ${receipt.receipt_number}...`);
-    const response = await fetch(`http://127.0.0.1:4001/api/receipts/${receipt.id}/bounce`, {
+    console.log(`Sending POST to bounce receipt endpoint on port ${port} for Receipt: ${receipt.receipt_number}...`);
+    const response = await fetch(`http://127.0.0.1:${port}/api/receipts/${receipt.id}/bounce`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -113,6 +128,9 @@ async function testChequeBounce() {
     process.exit(1);
   } finally {
     console.log("Cleaning up test database records...");
+    if (serverProcess) {
+      serverProcess.kill();
+    }
     if (salesOrder) {
       await prisma.ledger.deleteMany({ where: { sales_order_id: salesOrder.id } });
       if (receipt) {

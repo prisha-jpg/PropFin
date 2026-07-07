@@ -55,6 +55,7 @@ export default function SalesOrders() {
     { header: "Customer", accessor: "customer_name", cell: r => <span className="font-medium">{r.customer_name || "—"}</span> },
     { header: "Project", accessor: "project_name" },
     { header: "Unit", accessor: "unit_number" },
+    { header: "Agreement Value", accessor: "agreement_value", cell: r => <span className="font-medium text-slate-700">₹{Number(r.agreement_value || r.basic_sale_value || 0).toLocaleString()}</span> },
     { header: "Value", accessor: "total_value", cell: r => <span className="font-semibold">₹{(r.total_value || 0).toLocaleString()}</span> },
     { header: "Booking Date", accessor: "booking_date", cell: r => r.booking_date ? format(new Date(r.booking_date), "dd MMM yyyy") : "—" },
     { header: "Outstanding", accessor: "outstanding_amount", cell: r => <span className="text-red-600 font-medium">₹{(r.outstanding_amount || 0).toLocaleString()}</span> },

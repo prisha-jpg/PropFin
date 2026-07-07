@@ -40,21 +40,14 @@ import ResaleRequestPage from "@/pages/workflows/ResaleRequest";
 // Setup & Compliance
 import GenerateBankDoc from "@/pages/bank/GenerateBankDoc";
 import BankDocInquiry from "@/pages/bank/BankDocInquiry";
-import GenerateTDS from "@/pages/tds/GenerateTDS";
-import ViewTDS from "@/pages/tds/ViewTDS";
 import GenerateReminder from "@/pages/reminders/GenerateReminder";
 import ReminderInquiry from "@/pages/reminders/ReminderInquiry";
-import InterestSettlement from "@/pages/interest/InterestSettlement";
-import InterestCalculation from "@/pages/interest/InterestCalculation";
-import InterestSummary from "@/pages/interest/InterestSummary";
 import FPVCalculation from "@/pages/interest/FPVCalculation";
-import Agreements from "@/pages/other/Agreements";
-import WaiverRequestPage from "@/pages/other/WaiverRequest";
-import WaiverTypes from "@/pages/other/WaiverTypes";
 import DocumentChecklistPage from "@/pages/setup/DocumentChecklist";
 import ProjectDemandNumbers from "@/pages/setup/ProjectDemandNumbers";
 import BankMasterPage from "@/pages/setup/BankMasterPage";
 import TDSAccountPage from "@/pages/setup/TDSAccountPage";
+import SystemSettings from "@/pages/setup/SystemSettings";
 
 function AuthenticatedApp() {
   const { isAuthenticated, isLoadingAuth } = useAuth();
@@ -112,25 +105,18 @@ function AuthenticatedApp() {
         {/* Compliance & Banking */}
         <Route path="/bank-documents/generate" element={<GenerateBankDoc />} />
         <Route path="/bank-documents/inquiry" element={<BankDocInquiry />} />
-        <Route path="/tds/generate" element={<GenerateTDS />} />
-        <Route path="/tds/view" element={<ViewTDS />} />
         
         {/* Reminders & Interest */}
         <Route path="/reminders/generate" element={<GenerateReminder />} />
         <Route path="/reminders/inquiry" element={<ReminderInquiry />} />
-        <Route path="/interest/settlement" element={<InterestSettlement />} />
-        <Route path="/interest/calculation" element={<InterestCalculation />} />
-        <Route path="/interest/summary" element={<InterestSummary />} />
         <Route path="/interest/fpv" element={<FPVCalculation />} />
         
         {/* Setup & Others */}
-        <Route path="/agreements" element={<Agreements />} />
-        <Route path="/waiver/request" element={<WaiverRequestPage />} />
-        <Route path="/waiver/types" element={<WaiverTypes />} />
         <Route path="/setup/document-checklist" element={<DocumentChecklistPage />} />
         <Route path="/setup/demand-numbers" element={<ProjectDemandNumbers />} />
         <Route path="/setup/bank-master" element={<BankMasterPage />} />
         <Route path="/setup/tds-account" element={<TDSAccountPage />} />
+        <Route path="/setup/settings" element={<SystemSettings />} />
       </Route>
       <Route path="*" element={<PageNotFound />} />
     </Routes>

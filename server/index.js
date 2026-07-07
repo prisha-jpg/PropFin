@@ -3,9 +3,15 @@ import express from "express";
 import cors from "cors";
 import { PrismaClient } from "@prisma/client";
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
+import fsSync from "node:fs";
 import pricingRoutes from "./routes/pricing.js";
 import documentsRoutes from "./routes/documents.js";
 import { startInterestJob } from "./jobs/interestJob.js";
+import { syncHistoricalInterest } from "./utils/interestCalculator.js";
+import { calculateCustomerLedgerBalance } from "./utils/ledgerBalance.js";
+import { getLedgerSummarySync, getLedgerSummary, FinancialCalculationService, postLedgerEntry } from "./utils/ledgerFinancialService.js";
 
 const PORT = Number(process.env.API_PORT || 4000);
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -121,6 +127,33 @@ const ensureStorage = async () => {
   await prisma.$executeRawUnsafe(`
     ALTER TABLE projects
     ADD COLUMN IF NOT EXISTS default_gst_rate NUMERIC(5,2) DEFAULT 5
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE cancellation_requests 
+    DROP CONSTRAINT IF EXISTS cancellation_requests_status_check
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE cancellation_requests 
+    ADD CONSTRAINT cancellation_requests_status_check 
+    CHECK (status IN ('pending','under_review','approved','rejected','completed','cancelled','revoked'))
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE sales_orders 
+    DROP CONSTRAINT IF EXISTS sales_orders_status_check
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE sales_orders 
+    ADD CONSTRAINT sales_orders_status_check 
+    CHECK (status IN ('open_order','cancellation_requested','under_review','approved','cancelled','resale'))
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE units 
+    DROP CONSTRAINT IF EXISTS units_status_check
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE units 
+    ADD CONSTRAINT units_status_check 
+    CHECK (status IN ('available','booked','cancellation_requested','cancelled'))
   `);
 };
 
@@ -303,6 +336,80 @@ const sanitizeInputForPrisma = (modelName, payload) => {
     return cleaned;
   }
 
+  if (modelName === "cancellation_requests") {
+    const charges = toNumberOrZero(payload.admin_charges ?? payload.cancellation_charges);
+    const otherCharges = toNumberOrZero(payload.other_recoverable_charges ?? payload.forfeiture_amount);
+
+    const cleaned = {
+      request_number: payload.request_number || `CAN${Date.now().toString(36).toUpperCase()}`,
+      sales_order_id: payload.sales_order_id,
+      customer_id: payload.customer_id,
+      request_date: payload.request_date ? new Date(payload.request_date) : new Date(),
+      cancellation_reason: payload.reason || payload.cancellation_reason || null,
+      reason_description: payload.remarks || payload.reason_description || null,
+      total_amount_paid: toNumberOrZero(payload.amount_received ?? payload.total_amount_paid),
+      cancellation_charges: charges,
+      forfeiture_amount: otherCharges,
+      refundable_amount: toNumberOrZero(payload.refund_amount ?? payload.refundable_amount),
+      penalty_percentage: toNumberOrZero(payload.penalty_rate ?? payload.penalty_percentage ?? 0.5),
+      status: payload.status || "pending",
+      approved_by: payload.approved_by || null,
+      approval_date: payload.approval_date ? new Date(payload.approval_date) : null,
+      effective_date: payload.effective_date ? new Date(payload.effective_date) : null,
+      rejection_reason: payload.rejection_reason || null,
+    };
+    return cleaned;
+  }
+
+  if (modelName === "refund_requests") {
+    const cleaned = {};
+    const allowed = [
+      "request_number", "sales_order_id", "customer_id", "request_date",
+      "refund_amount", "tds_deduction", "account_holder_name", "account_number",
+      "ifsc_code", "payment_mode", "status", "rejection_reason",
+      "approved_by", "finance_reviewed_by", "disbursed_by", "disbursement_date",
+      "transaction_reference", "journal_voucher_no", "created_by"
+    ];
+    for (const key of allowed) {
+      if (payload[key] !== undefined) {
+        if (["request_date", "disbursement_date"].includes(key)) {
+          cleaned[key] = payload[key] ? new Date(payload[key]) : null;
+        } else if (["refund_amount", "tds_deduction"].includes(key)) {
+          cleaned[key] = toNumberOrZero(payload[key]);
+        } else {
+          cleaned[key] = payload[key];
+        }
+      }
+    }
+    if (!cleaned.request_number && !payload.id) {
+      cleaned.request_number = `REF${Date.now().toString(36).toUpperCase()}`;
+    }
+    if (cleaned.request_date === undefined && !payload.id) {
+      cleaned.request_date = new Date();
+    }
+    return cleaned;
+  }
+
+  if (modelName === "bank_documents") {
+    return {
+      document_number: payload.document_number,
+      sales_order_id: payload.sales_order_id,
+      customer_id: payload.customer_id,
+      document_type: payload.document_type || "bank_noc",
+      generation_date: payload.generation_date ? new Date(payload.generation_date) : new Date(),
+      loan_account_number: payload.loan_account_number || null,
+      loan_amount: payload.loan_amount ? Number(payload.loan_amount) : null,
+      bank_officer_name: payload.bank_officer_name || null,
+      bank_officer_designation: payload.bank_officer_designation || null,
+      noc_purpose: payload.noc_purpose || "home_loan",
+      document_content: payload.document_content || null,
+      file_path: payload.file_path || null,
+      status: payload.status || "draft",
+      generated_by: payload.generated_by || null,
+      created_by: payload.created_by || null
+    };
+  }
+
 
   // Remove generic unsupported fields normally passed by frontend
   if (payload.full_name) delete payload.full_name;
@@ -400,7 +507,6 @@ const entityMap = {
   TDSAccount: "tds_accounts",
   InterestEntry: "interest_entries",
   InterestSettlement: "interest_settlements",
-  ClientTDS: "client_tds_records",
   PaymentReminder: "payment_reminder_letters",
   BankDocument: "bank_documents",
   ResaleRequest: "resale_requests",
@@ -408,6 +514,7 @@ const entityMap = {
   ShiftingRequest: "shifting_requests",
   RefundRequest: "refund_requests",
   HandoverRequest: "handover_requests",
+  Ledger: "ledger",
 };
 
 const getInclude = (modelName) => {
@@ -418,6 +525,8 @@ const getInclude = (modelName) => {
       units: true,
       demand_letters: true,
       customer_receipts: true,
+      ledger: true,
+      refund_requests: true,
       payment_schedules: {
         orderBy: {
           display_order: "asc"
@@ -431,7 +540,6 @@ const getInclude = (modelName) => {
     "payment_reminder_letters",
     "interest_entries",
     "interest_settlements",
-    "client_tds_records",
     "bank_documents",
     "cancellation_requests",
     "refund_requests",
@@ -477,6 +585,16 @@ const getInclude = (modelName) => {
   return undefined;
 };
 
+const calculateRefundFromLedger = async (salesOrderId, prismaClient) => {
+  if (!salesOrderId) return 0;
+  try {
+    return await FinancialCalculationService.calculateRefund(salesOrderId, prismaClient);
+  } catch (err) {
+    console.error("Error calculating refund from ledger:", err);
+    return 0;
+  }
+};
+
 const mapRelations = (modelName, row) => {
   if (!row) return row;
   const mapped = { ...row };
@@ -492,21 +610,14 @@ const mapRelations = (modelName, row) => {
     if (row.units) {
       mapped.unit_number = row.units.unit_number;
     }
-    // Calculate dynamic outstanding_amount = Total Demanded - Total Received
-    const totalDemanded = (row.demand_letters || []).reduce((sum, d) => {
-      return sum + Number(d.total_demand_amount || d.principal_amount || 0);
-    }, 0);
-    const totalReceipts = (row.customer_receipts || []).reduce((sum, r) => {
-      return sum + Number(r.amount || 0);
-    }, 0);
-    mapped.outstanding_amount = Number((totalDemanded - totalReceipts).toFixed(2));
+    const summary = getLedgerSummarySync(row);
+    mapped.outstanding_amount = summary.outstandingBalance;
   } else if ([
     "customer_receipts",
     "demand_letters",
     "payment_reminder_letters",
     "interest_entries",
     "interest_settlements",
-    "client_tds_records",
     "bank_documents",
     "cancellation_requests",
     "refund_requests",
@@ -644,6 +755,34 @@ app.get("/api/health", async (_req, res) => {
     res.json({ status: "ok", now: result[0]?.now || null });
   } catch (error) {
     res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+const SETTINGS_FILE = path.join(process.cwd(), "server", "system_settings.json");
+
+app.get("/api/system-settings", async (req, res) => {
+  try {
+    const data = await fs.readFile(SETTINGS_FILE, "utf-8");
+    res.json(JSON.parse(data));
+  } catch (error) {
+    res.json({
+      cancellation_charge_percent: 5,
+      cancellation_gst_rate: 18
+    });
+  }
+});
+
+app.post("/api/system-settings", authenticateToken, async (req, res) => {
+  try {
+    const { cancellation_charge_percent, cancellation_gst_rate } = req.body;
+    const settings = {
+      cancellation_charge_percent: Number(cancellation_charge_percent !== undefined ? cancellation_charge_percent : 5),
+      cancellation_gst_rate: Number(cancellation_gst_rate !== undefined ? cancellation_gst_rate : 18)
+    };
+    await fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf-8");
+    res.json({ success: true, settings });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -866,10 +1005,474 @@ app.get("/api/auth/me", authenticateToken, async (req, res) => {
   }
 });
 
+// ==========================================
+// UNIT SHIFTING ENDPOINTS
+// ==========================================
+
+// 1. GET /api/shift/orders (Get orders available for shifting)
+app.get("/api/shift/orders", authenticateToken, async (req, res) => {
+  try {
+    const activeOrders = await prisma.sales_orders.findMany({
+      where: {
+        status: { notIn: ["cancelled", "resale"] }
+      },
+      include: {
+        customers: true,
+        projects: true,
+        units: {
+          include: {
+            blocks: true,
+            unitPricing: true
+          }
+        },
+        demand_letters: true,
+        customer_receipts: true,
+        ledger: true
+      }
+    });
+
+    // Filter out already shifted orders (where there is an approved shifting request)
+    const approvedShifts = await prisma.shifting_requests.findMany({
+      where: { status: "approved" },
+      select: { sales_order_id: true }
+    });
+    const alreadyShiftedIds = new Set(approvedShifts.map(s => s.sales_order_id));
+
+    const eligibleOrders = [];
+    for (const order of activeOrders) {
+      if (alreadyShiftedIds.has(order.id)) {
+        continue;
+      }
+      const summary = getLedgerSummarySync(order);
+      eligibleOrders.push({
+        id: order.id,
+        order_number: order.order_number,
+        customer_id: order.customer_id,
+        customer_name: order.customers.full_name || `${order.customers.first_name || ""} ${order.customers.last_name || ""}`.trim() || "Unknown",
+        project_id: order.project_id,
+        project_name: order.projects.project_name,
+        unit_id: order.unit_id,
+        unit_number: order.units.unit_number,
+        floor: order.units.floor_number || 0,
+        area: Number(order.units.carpet_area || 0),
+        agreement_value: summary.agreementValue,
+        amount_paid: summary.amountPaid,
+        outstanding_amount: summary.outstandingBalance,
+        booking_date: order.booking_date,
+        status: order.status
+      });
+    }
+
+    return res.json(eligibleOrders);
+  } catch (error) {
+    console.error("Error fetching shift orders:", error);
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// 2. GET /api/shift/available-units (Get available units for destination)
+app.get("/api/shift/available-units", authenticateToken, async (req, res) => {
+  try {
+    const availableUnits = await prisma.units.findMany({
+      where: {
+        status: "available"
+      },
+      include: {
+        projects: true,
+        blocks: true,
+        unitPricing: true
+      }
+    });
+
+    const formattedUnits = availableUnits.map(unit => ({
+      id: unit.id,
+      project_id: unit.project_id,
+      project_name: unit.projects.project_name,
+      block_id: unit.block_id,
+      tower_name: unit.blocks?.block_name || unit.blocks?.block_code || "N/A",
+      unit_number: unit.unit_number,
+      floor_number: unit.floor_number || 0,
+      carpet_area: Number(unit.carpet_area || 0),
+      facing: unit.facing || "N/A",
+      unit_type: unit.unit_type || "N/A",
+      agreement_value: Number(unit.unitPricing?.basic_sale_value || unit.base_price || 0)
+    }));
+
+    return res.json(formattedUnits);
+  } catch (error) {
+    console.error("Error fetching available units for shift:", error);
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// 3. POST /api/shift/request (Create shifting request)
+app.post("/api/shift/request", authenticateToken, async (req, res) => {
+  try {
+    const { sales_order_id, to_unit_id, reason } = req.body;
+    if (!sales_order_id || !to_unit_id) {
+      return res.status(400).json({ message: "sales_order_id and to_unit_id are required" });
+    }
+
+    // 1. Fetch Sales Order
+    const salesOrder = await prisma.sales_orders.findUnique({
+      where: { id: sales_order_id },
+      include: { units: true }
+    });
+    if (!salesOrder) {
+      return res.status(404).json({ message: "Sales order not found" });
+    }
+    if (salesOrder.status === "cancelled" || salesOrder.status === "resale") {
+      return res.status(400).json({ message: "Cannot shift a cancelled or resold booking" });
+    }
+
+    // 2. Check if already shifted
+    const approvedShift = await prisma.shifting_requests.findFirst({
+      where: { sales_order_id, status: "approved" }
+    });
+    if (approvedShift) {
+      return res.status(400).json({ message: "This sales order has already been shifted" });
+    }
+
+    // 3. Fetch Destination Unit
+    const toUnit = await prisma.units.findUnique({
+      where: { id: to_unit_id },
+      include: { unitPricing: true }
+    });
+    if (!toUnit) {
+      return res.status(404).json({ message: "Destination unit not found" });
+    }
+    if (toUnit.status !== "available") {
+      return res.status(400).json({ message: "Destination unit is not available" });
+    }
+    if (toUnit.id === salesOrder.unit_id) {
+      return res.status(400).json({ message: "Destination unit cannot be the same as the current unit" });
+    }
+
+    // 4. Check for pending shift requests
+    const duplicatePending = await prisma.shifting_requests.findFirst({
+      where: { sales_order_id, status: "pending" }
+    });
+    if (duplicatePending) {
+      return res.status(409).json({ message: "A pending shifting request already exists for this sales order" });
+    }
+
+    // 5. Perform calculations
+    const oldAgreement = Number(salesOrder.agreement_value || salesOrder.basic_sale_value || 0);
+    const newAgreement = Number(toUnit.unitPricing?.basic_sale_value || toUnit.base_price || 0);
+    const priceDiff = newAgreement - oldAgreement;
+    const areaDiff = Number(toUnit.carpet_area || 0) - Number(salesOrder.units?.carpet_area || 0);
+    const floorDiff = Number(toUnit.floor_number || 0) - Number(salesOrder.units?.floor_number || 0);
+
+    // 6. Create request
+    const request = await prisma.shifting_requests.create({
+      data: {
+        request_number: "SH" + Date.now().toString(36).toUpperCase(),
+        sales_order_id: salesOrder.id,
+        customer_id: salesOrder.customer_id,
+        from_unit_id: salesOrder.unit_id,
+        to_unit_id: toUnit.id,
+        from_project_id: salesOrder.project_id,
+        to_project_id: toUnit.project_id,
+        request_date: new Date(),
+        reason: reason || null,
+        price_difference: priceDiff,
+        area_difference: areaDiff,
+        floor_difference: floorDiff,
+        old_agreement_value: oldAgreement,
+        new_agreement_value: newAgreement,
+        additional_amount_payable: priceDiff,
+        status: "pending",
+        created_by: req.user?.id || null
+      }
+    });
+
+    return res.status(201).json(request);
+  } catch (error) {
+    console.error("Error creating shifting request:", error);
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// 4. GET /api/shift/history (Get shifting request history)
+app.get("/api/shift/history", authenticateToken, async (req, res) => {
+  try {
+    const history = await prisma.shifting_requests.findMany({
+      orderBy: { created_at: "desc" },
+      include: {
+        customers: true,
+        sales_orders: true,
+        projects_shifting_requests_from_project_idToprojects: true,
+        projects_shifting_requests_to_project_idToprojects: true,
+        units_shifting_requests_from_unit_idTounits: {
+          include: { blocks: true }
+        },
+        units_shifting_requests_to_unit_idTounits: {
+          include: { blocks: true }
+        },
+        users_shifting_requests_requested_byTousers: true,
+        users_shifting_requests_approved_byTousers: true
+      }
+    });
+
+    const formattedHistory = history.map(req => {
+      const customerName = req.customers.full_name || `${req.customers.first_name || ""} ${req.customers.last_name || ""}`.trim() || "Unknown";
+      return {
+        id: req.id,
+        request_number: req.request_number,
+        request_date: req.request_date,
+        customer_id: req.customer_id,
+        customer_name: customerName,
+        sales_order_id: req.sales_order_id,
+        order_number: req.sales_orders.order_number,
+        from_project_id: req.from_project_id,
+        from_project_name: req.projects_shifting_requests_from_project_idToprojects?.project_name || "N/A",
+        to_project_id: req.to_project_id,
+        to_project_name: req.projects_shifting_requests_to_project_idToprojects?.project_name || "N/A",
+        from_unit_id: req.from_unit_id,
+        from_unit_number: req.units_shifting_requests_from_unit_idTounits.unit_number,
+        from_tower: req.units_shifting_requests_from_unit_idTounits.blocks?.block_name || "N/A",
+        to_unit_id: req.to_unit_id,
+        to_unit_number: req.units_shifting_requests_to_unit_idTounits.unit_number,
+        to_tower: req.units_shifting_requests_to_unit_idTounits.blocks?.block_name || "N/A",
+        price_difference: Number(req.price_difference || 0),
+        area_difference: Number(req.area_difference || 0),
+        floor_difference: req.floor_difference || 0,
+        old_agreement_value: Number(req.old_agreement_value || 0),
+        new_agreement_value: Number(req.new_agreement_value || 0),
+        status: req.status,
+        reason: req.reason,
+        rejection_reason: req.rejection_reason,
+        requested_by: req.users_shifting_requests_requested_byTousers?.full_name || "System",
+        approved_by: req.users_shifting_requests_approved_byTousers?.full_name || "N/A",
+        approval_date: req.approval_date,
+        effective_date: req.effective_date
+      };
+    });
+
+    return res.json(formattedHistory);
+  } catch (error) {
+    console.error("Error fetching shifting history:", error);
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// 5. GET /api/shift/:id (Get shifting request detail)
+app.get("/api/shift/:id", authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const request = await prisma.shifting_requests.findUnique({
+      where: { id },
+      include: {
+        customers: true,
+        sales_orders: true,
+        projects_shifting_requests_from_project_idToprojects: true,
+        projects_shifting_requests_to_project_idToprojects: true,
+        units_shifting_requests_from_unit_idTounits: {
+          include: { blocks: true }
+        },
+        units_shifting_requests_to_unit_idTounits: {
+          include: { blocks: true }
+        },
+        users_shifting_requests_requested_byTousers: true,
+        users_shifting_requests_approved_byTousers: true
+      }
+    });
+    if (!request) {
+      return res.status(404).json({ message: "Shifting request not found" });
+    }
+
+    const customerName = request.customers.full_name || `${request.customers.first_name || ""} ${request.customers.last_name || ""}`.trim() || "Unknown";
+    const formatted = {
+      id: request.id,
+      request_number: request.request_number,
+      request_date: request.request_date,
+      customer_id: request.customer_id,
+      customer_name: customerName,
+      sales_order_id: request.sales_order_id,
+      order_number: request.sales_orders.order_number,
+      from_project_id: request.from_project_id,
+      from_project_name: request.projects_shifting_requests_from_project_idToprojects?.project_name || "N/A",
+      to_project_id: request.to_project_id,
+      to_project_name: request.projects_shifting_requests_to_project_idToprojects?.project_name || "N/A",
+      from_unit_id: request.from_unit_id,
+      from_unit_number: request.units_shifting_requests_from_unit_idTounits.unit_number,
+      from_tower: request.units_shifting_requests_from_unit_idTounits.blocks?.block_name || "N/A",
+      to_unit_id: request.to_unit_id,
+      to_unit_number: request.units_shifting_requests_to_unit_idTounits.unit_number,
+      to_tower: request.units_shifting_requests_to_unit_idTounits.blocks?.block_name || "N/A",
+      price_difference: Number(request.price_difference || 0),
+      area_difference: Number(request.area_difference || 0),
+      floor_difference: request.floor_difference || 0,
+      old_agreement_value: Number(request.old_agreement_value || 0),
+      new_agreement_value: Number(request.new_agreement_value || 0),
+      status: request.status,
+      reason: request.reason,
+      rejection_reason: request.rejection_reason,
+      requested_by: request.users_shifting_requests_requested_byTousers?.full_name || "System",
+      approved_by: request.users_shifting_requests_approved_byTousers?.full_name || "N/A",
+      approval_date: request.approval_date,
+      effective_date: request.effective_date
+    };
+
+    return res.json(formatted);
+  } catch (error) {
+    console.error("Error fetching shifting request details:", error);
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// 6. PUT /api/shift/approve (Approve request and execute shift)
+app.put("/api/shift/approve", authenticateToken, async (req, res) => {
+  try {
+    const { requestId } = req.body;
+    if (!requestId) {
+      return res.status(400).json({ message: "requestId is required" });
+    }
+
+    // 1. Fetch Request details
+    const request = await prisma.shifting_requests.findUnique({
+      where: { id: requestId },
+      include: {
+        sales_orders: true,
+        units_shifting_requests_from_unit_idTounits: true,
+        units_shifting_requests_to_unit_idTounits: {
+          include: { unitPricing: true }
+        }
+      }
+    });
+
+    if (!request) {
+      return res.status(404).json({ message: "Shifting request not found" });
+    }
+    if (request.status !== "pending") {
+      return res.status(400).json({ message: "Only pending requests can be approved" });
+    }
+
+    const toUnit = request.units_shifting_requests_to_unit_idTounits;
+    if (toUnit.status !== "available") {
+      return res.status(400).json({ message: "Destination unit is no longer available" });
+    }
+
+    // 2. Perform transactional updates
+    await prisma.$transaction(async (tx) => {
+      // A. Update Sales Order unit, block, and value
+      const newAgreement = Number(toUnit.unitPricing?.basic_sale_value || toUnit.base_price || 0);
+      await tx.sales_orders.update({
+        where: { id: request.sales_order_id },
+        data: {
+          unit_id: request.to_unit_id,
+          agreement_value: newAgreement,
+          basic_sale_value: newAgreement,
+          block_id: toUnit.block_id || null,
+          project_id: request.to_project_id
+        }
+      });
+
+      // B. Release the old unit (set available)
+      await tx.units.update({
+        where: { id: request.from_unit_id },
+        data: { status: "available" }
+      });
+
+      // C. Book the new unit (set booked)
+      await tx.units.update({
+        where: { id: request.to_unit_id },
+        data: { status: "booked" }
+      });
+
+      // D. Post ledger entry if price difference exists
+      const priceDiff = Number(request.price_difference || 0);
+      if (priceDiff !== 0) {
+        const desc = `Shift Adjustment: ${priceDiff >= 0 ? "Additional Demand" : "Credit Adjustment"} due to shifting from Unit ${request.units_shifting_requests_from_unit_idTounits.unit_number} to Unit ${toUnit.unit_number}`;
+        await postLedgerEntry(tx, {
+          sales_order_id: request.sales_order_id,
+          customer_id: request.customer_id,
+          transaction_type: "ADJUSTMENT",
+          amount: priceDiff,
+          description: desc,
+          reference_no: request.request_number,
+          ledger_reference_type: "UnitShift",
+          ledger_reference_id: request.id,
+          created_by: req.user?.id || null
+        });
+      }
+
+      // E. Update request status to approved
+      await tx.shifting_requests.update({
+        where: { id: requestId },
+        data: {
+          status: "approved",
+          approval_date: new Date(),
+          approved_by: req.user?.id || null,
+          effective_date: new Date()
+        }
+      });
+    });
+
+    // 3. Recalculate interest and outstanding balance JIT after commit
+    await syncHistoricalInterest(request.customer_id, prisma);
+
+    // 4. Return updated request info
+    const updatedRequest = await prisma.shifting_requests.findUnique({
+      where: { id: requestId }
+    });
+
+    return res.json(updatedRequest);
+  } catch (error) {
+    console.error("Error approving shifting request:", error);
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// 7. PUT /api/shift/reject (Reject shifting request)
+app.put("/api/shift/reject", authenticateToken, async (req, res) => {
+  try {
+    const { requestId, rejection_reason } = req.body;
+    if (!requestId) {
+      return res.status(400).json({ message: "requestId is required" });
+    }
+
+    const request = await prisma.shifting_requests.findUnique({
+      where: { id: requestId }
+    });
+    if (!request) {
+      return res.status(404).json({ message: "Shifting request not found" });
+    }
+    if (request.status !== "pending") {
+      return res.status(400).json({ message: "Only pending requests can be rejected" });
+    }
+
+    const updated = await prisma.shifting_requests.update({
+      where: { id: requestId },
+      data: {
+        status: "rejected",
+        rejection_reason: rejection_reason || "Rejected by administrator",
+        approval_date: new Date(),
+        approved_by: req.user?.id || null
+      }
+    });
+
+    return res.json(updated);
+  } catch (error) {
+    console.error("Error rejecting shifting request:", error);
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 app.get("/api/entities/:entity", authenticateToken, async (req, res) => {
   try {
     const entity = sanitizeEntity(req.params.entity);
     const data = await listRecords(entity, req.query.sort, req.query.limit);
+    
+    if (entity === "CancellationRequest" || entity === "cancellation_requests") {
+      for (const item of data) {
+        if (item.status === "approved" || item.status === "completed") {
+          item.refund_amount = await calculateRefundFromLedger(item.sales_order_id, prisma);
+          item.refundable_amount = item.refund_amount;
+        }
+      }
+    }
+    
     res.json(data);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -896,7 +1499,12 @@ app.get("/api/entities/:entity/:id", authenticateToken, async (req, res) => {
     if (!record) {
       return res.status(404).json({ message: "Record not found" });
     }
-    return res.json(mapRelations(modelName, record));
+    const mapped = mapRelations(modelName, record);
+    if (modelName === "cancellation_requests" && (mapped.status === "approved" || mapped.status === "completed")) {
+      mapped.refund_amount = await calculateRefundFromLedger(mapped.sales_order_id, prisma);
+      mapped.refundable_amount = mapped.refund_amount;
+    }
+    return res.json(mapped);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -948,18 +1556,17 @@ app.post("/api/entities/:entity", authenticateToken, async (req, res) => {
 
         const startStr = new Date(payload.period_from).toLocaleDateString("en-IN");
         const calcStr = new Date(payload.period_to).toLocaleDateString("en-IN");
-        const description = `Delayed payment interest for the period of ${startStr} to ${calcStr}`;
+        const days = Number(payload.days || payload.days_overdue || 0);
+        const description = `Delayed payment interest for the period of ${startStr} to ${calcStr} (${days} days)`;
 
-        await tx.ledger.create({
-          data: {
-            sales_order_id: payload.sales_order_id,
-            customer_id: payload.customer_id,
-            transaction_type: "LATE_FEE_INTEREST",
-            amount: Number(payload.interest_amount || 0),
-            reference_date: new Date(payload.period_to),
-            description: description,
-            status: "UNPAID"
-          }
+        await postLedgerEntry(tx, {
+          sales_order_id: payload.sales_order_id,
+          customer_id: payload.customer_id,
+          transaction_type: "INTEREST",
+          amount: Number(payload.interest_amount || 0),
+          reference_date: new Date(payload.period_to),
+          description: description,
+          reference_no: `INT-${payload.sales_order_id}`
         });
 
         await tx.customers.update({
@@ -970,6 +1577,298 @@ app.post("/api/entities/:entity", authenticateToken, async (req, res) => {
             }
           }
         });
+      });
+
+      return res.status(201).json(mapRelations(modelName, record));
+    }
+
+    if (modelName === "shifting_requests") {
+      const salesOrder = await prisma.sales_orders.findUnique({
+        where: { id: payload.sales_order_id },
+        include: { units: true }
+      });
+      if (!salesOrder) {
+        return res.status(400).json({ message: "Sales order not found" });
+      }
+
+      // 1. Resolve From Project and Unit
+      const fromProjectId = salesOrder.project_id;
+      const fromUnitId = salesOrder.unit_id;
+
+      // 2. Resolve To Project
+      let toProjectId;
+      const targetProjName = (payload.new_project || "Unknown Project").trim();
+      const existingProject = await prisma.projects.findFirst({
+        where: { project_name: { equals: targetProjName, mode: "insensitive" } }
+      });
+      if (existingProject) {
+        toProjectId = existingProject.id;
+      } else {
+        const newProj = await prisma.projects.create({
+          data: {
+            project_code: `PRJ-${Date.now().toString(36).toUpperCase()}`,
+            project_name: targetProjName
+          }
+        });
+        toProjectId = newProj.id;
+      }
+
+      // 3. Resolve To Unit
+      let toUnitId;
+      const targetUnitNo = (payload.new_unit || "Unknown Unit").trim();
+      const existingUnit = await prisma.units.findFirst({
+        where: {
+          project_id: toProjectId,
+          unit_number: { equals: targetUnitNo, mode: "insensitive" }
+        }
+      });
+      if (existingUnit) {
+        toUnitId = existingUnit.id;
+      } else {
+        const newUnit = await prisma.units.create({
+          data: {
+            project_id: toProjectId,
+            unit_number: targetUnitNo,
+            floor_number: Number(payload.new_floor) || null,
+            status: "available"
+          }
+        });
+        toUnitId = newUnit.id;
+      }
+
+      // 4. Create the shifting request record
+      const record = await prisma.shifting_requests.create({
+        data: {
+          request_number: payload.request_number || `SH${Date.now().toString(36).toUpperCase()}`,
+          sales_order_id: payload.sales_order_id,
+          customer_id: payload.customer_id,
+          from_unit_id: fromUnitId,
+          to_unit_id: toUnitId,
+          from_project_id: fromProjectId,
+          to_project_id: toProjectId,
+          request_date: payload.request_date ? new Date(payload.request_date) : new Date(),
+          reason: payload.reason || null,
+          price_difference: Number(payload.difference_amount) || 0,
+          area_difference: Number(payload.new_area || 0) - Number(salesOrder.units.carpet_area || 0),
+          floor_difference: (Number(payload.new_floor || 0) - Number(salesOrder.units.floor_number || 0)),
+          additional_amount_payable: Number(payload.difference_amount) || 0,
+          status: payload.status || "pending"
+        },
+        include: getInclude(modelName)
+      });
+
+      return res.status(201).json(mapRelations(modelName, record));
+    }
+
+    if (modelName === "cancellation_requests") {
+      const salesOrderId = payload.sales_order_id;
+      if (salesOrderId) {
+        const order = await prisma.sales_orders.findUnique({
+          where: { id: salesOrderId }
+        });
+        if (!order) {
+          return res.status(404).json({ message: "Sales order not found" });
+        }
+        if (order.status === "cancelled") {
+          return res.status(409).json({
+            message: "CANCELLATION_ALREADY_EXISTS",
+            detail: "CANCELLATION_ALREADY_EXISTS",
+            code: "CANCELLATION_ALREADY_EXISTS"
+          });
+        }
+
+        const existingRequest = await prisma.cancellation_requests.findFirst({
+          where: {
+            sales_order_id: salesOrderId,
+            status: { notIn: ["revoked", "rejected"] }
+          }
+        });
+        if (existingRequest) {
+          return res.status(409).json({
+            message: "CANCELLATION_ALREADY_EXISTS",
+            detail: "CANCELLATION_ALREADY_EXISTS",
+            code: "CANCELLATION_ALREADY_EXISTS"
+          });
+        }
+
+        const cleanedData = sanitizeInputForPrisma(modelName, payload);
+        const include = getInclude(modelName);
+
+        const record = await prisma.$transaction(async (tx) => {
+          await tx.sales_orders.update({
+            where: { id: salesOrderId },
+            data: { status: "cancellation_requested" }
+          });
+
+          await tx.units.update({
+            where: { id: order.unit_id },
+            data: { status: "cancellation_requested" }
+          });
+
+          return await tx.cancellation_requests.create({
+            data: cleanedData,
+            ...(include ? { include } : {})
+          });
+        });
+
+        return res.status(201).json(mapRelations(modelName, record));
+      }
+    }
+
+    if (modelName === "refund_requests") {
+      const salesOrderId = payload.sales_order_id;
+      if (!salesOrderId) {
+        return res.status(400).json({ message: "sales_order_id is required" });
+      }
+
+      const salesOrder = await prisma.sales_orders.findUnique({
+        where: { id: salesOrderId },
+        include: {
+          customers: true,
+          projects: true,
+          units: true,
+          demand_letters: true,
+          customer_receipts: true,
+          ledger: true,
+          refund_requests: true
+        }
+      });
+
+      if (!salesOrder) {
+        return res.status(404).json({ message: "Sales order not found" });
+      }
+
+      if (salesOrder.status !== "cancelled") {
+        return res.status(400).json({ message: "Refunds can only be processed for cancelled bookings" });
+      }
+
+      const summary = getLedgerSummarySync(salesOrder);
+      if (summary.netPayable <= 0) {
+        return res.status(400).json({ message: "Net payable amount must be greater than zero to request a refund" });
+      }
+
+      const activeRefund = salesOrder.refund_requests.find(
+        r => ["pending", "under_review", "approved", "bank_processing", "disbursed"].includes(r.status)
+      );
+      if (activeRefund) {
+        return res.status(409).json({ message: "An active refund request already exists for this sales order" });
+      }
+
+      const amountToRefund = payload.refund_amount ? Number(payload.refund_amount) : Number(summary.netPayable);
+
+      const cleanedData = sanitizeInputForPrisma(modelName, {
+        ...payload,
+        refund_amount: amountToRefund,
+        status: "pending",
+        requested_by: req.user?.id || null
+      });
+
+      const include = getInclude(modelName);
+      const record = await prisma.refund_requests.create({
+        data: cleanedData,
+        ...(include ? { include } : {})
+      });
+
+      return res.status(201).json(mapRelations(modelName, record));
+    }
+
+    if (modelName === "bank_documents") {
+      const salesOrderId = payload.sales_order_id;
+      if (!salesOrderId) {
+        return res.status(400).json({ message: "sales_order_id is required" });
+      }
+
+      // Generate automatic sequential document number: BNOC-YYYY-000001
+      const currentYear = new Date().getFullYear();
+      const prefix = `BNOC-${currentYear}-`;
+      const lastDoc = await prisma.bank_documents.findFirst({
+        where: {
+          document_number: {
+            startsWith: prefix
+          }
+        },
+        orderBy: {
+          document_number: "desc"
+        }
+      });
+
+      let nextNum = 1;
+      if (lastDoc && lastDoc.document_number) {
+        const parts = lastDoc.document_number.split("-");
+        const lastSeq = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(lastSeq)) {
+          nextNum = lastSeq + 1;
+        }
+      }
+      const seqStr = String(nextNum).padStart(6, "0");
+      const generatedDocNo = `${prefix}${seqStr}`;
+
+      // Retrieve full data to populate document_content JSON
+      const salesOrder = await prisma.sales_orders.findUnique({
+        where: { id: salesOrderId },
+        include: {
+          customers: true,
+          projects: true,
+          units: true,
+          demand_letters: true,
+          customer_receipts: true,
+          ledger: true
+        }
+      });
+
+      if (!salesOrder) {
+        return res.status(404).json({ message: "Sales order not found" });
+      }
+
+      const summary = getLedgerSummarySync(salesOrder);
+
+      // Create document_content JSON with all variable fields needed for reproduction/re-rendering
+      const documentContent = {
+        document_number: generatedDocNo,
+        document_type: payload.document_type || "bank_noc",
+        sales_order_id: salesOrderId,
+        customer_id: salesOrder.customer_id,
+        customer_name: payload.customer_name || salesOrder.customers.full_name || salesOrder.customers.first_name,
+        customer_code: salesOrder.customers.customer_code,
+        project_name: salesOrder.projects.project_name,
+        unit_number: salesOrder.units.unit_number,
+        bank_name: payload.bank_name || "",
+        branch_name: payload.branch_name || payload.branch || "",
+        loan_account_number: payload.loan_account_number || "",
+        loan_amount: Number(payload.loan_amount || 0),
+        noc_issue_date: payload.noc_issue_date || new Date().toISOString().split("T")[0],
+        noc_purpose: payload.noc_purpose || "home_loan",
+        bank_officer_name: payload.bank_officer_name || "",
+        bank_officer_designation: payload.bank_officer_designation || "",
+        agreement_value: Number(payload.agreement_value || salesOrder.agreement_value || 0),
+        amount_received_to_date: Number(summary.amountReceivedToDate || 0),
+        outstanding_amount: Number(summary.outstandingBalance || 0),
+        authorized_signatory: payload.authorized_signatory || "Authorized Signatory",
+        remarks: payload.remarks || "",
+        co_applicant: payload.co_applicant || "N/A",
+        agreement_date: salesOrder.agreement_date || null,
+        survey_number: salesOrder.projects.project_code || "Survey No. 44",
+        project_location: salesOrder.projects.location || "Balewadi",
+        project_city: salesOrder.projects.city || "Pune",
+        project_state: salesOrder.projects.state || "Maharashtra",
+        generation_date: new Date().toISOString().split("T")[0]
+      };
+
+      const cleanedData = sanitizeInputForPrisma(modelName, {
+        ...payload,
+        document_number: generatedDocNo,
+        document_content: documentContent,
+        generation_date: new Date(),
+        status: "generated", // Generate immediately completes the record
+        generated_by: req.user?.id || null,
+        created_by: req.user?.id || null,
+        file_path: `/uploads/documents/${generatedDocNo}.pdf`
+      });
+
+      const include = getInclude(modelName);
+      const record = await prisma.bank_documents.create({
+        data: cleanedData,
+        ...(include ? { include } : {})
       });
 
       return res.status(201).json(mapRelations(modelName, record));
@@ -1002,7 +1901,6 @@ app.patch("/api/entities/:entity/:id", authenticateToken, async (req, res) => {
     // For patch we only want to update passed fields, but sanitizeInputForPrisma drops missing ones right now
     // Actually we could just use it and rely on what's there
     let cleanedData = {};
-    if (Object.keys(payload).length > 0) {
         if (modelName === "customers") {
             const mapped = sanitizeInputForPrisma(modelName, payload);
             // Only update fields that were actually in the original patch
@@ -1010,19 +1908,326 @@ app.patch("/api/entities/:entity/:id", authenticateToken, async (req, res) => {
               if (mapped[key] !== undefined && mapped[key] !== null) acc[key] = mapped[key];
               return acc;
             }, {});
+        } else if (modelName === "cancellation_requests") {
+            const mapped = sanitizeInputForPrisma(modelName, payload);
+            const keyAliasMap = {
+              cancellation_reason: ["reason", "cancellation_reason"],
+              reason_description: ["remarks", "reason_description"],
+              total_amount_paid: ["amount_received", "total_amount_paid"],
+              cancellation_charges: ["admin_charges", "cancellation_charges"],
+              forfeiture_amount: ["deduction_amount", "forfeiture_amount", "admin_charges", "cancellation_charges"],
+              refundable_amount: ["refund_amount", "refundable_amount"],
+              penalty_percentage: ["penalty_rate", "penalty_percentage"],
+              status: ["status"],
+              approval_date: ["approval_date"],
+              effective_date: ["effective_date"],
+              rejection_reason: ["rejection_reason"],
+              sales_order_id: ["sales_order_id"],
+              customer_id: ["customer_id"],
+              request_date: ["request_date"],
+              request_number: ["request_number"]
+            };
+
+            cleanedData = Object.keys(mapped).reduce((acc, key) => {
+              const aliases = keyAliasMap[key] || [key];
+              const hasKey = aliases.some(alias => payload[alias] !== undefined);
+              if (hasKey && mapped[key] !== undefined && mapped[key] !== null) {
+                acc[key] = mapped[key];
+              }
+              return acc;
+            }, {});
+            fsSync.appendFileSync(path.join(process.cwd(), "server", "debug.log"), `[PATCH Request] payload: ${JSON.stringify(payload)}\n[PATCH Request] cleanedData: ${JSON.stringify(cleanedData)}\n`);
         } else {
             cleanedData = sanitizeInputForPrisma(modelName, payload);
         }
-    }
 
     const include = getInclude(modelName);
+
+    if (modelName === "cancellation_requests") {
+      const currentRequest = await prisma.cancellation_requests.findUnique({
+        where: { id },
+        include: { sales_orders: true }
+      });
+      if (!currentRequest) {
+        return res.status(404).json({ message: "Cancellation request not found" });
+      }
+
+      const fromStatus = currentRequest.status;
+      const toStatus = cleanedData.status;
+
+      // Transition validations
+      if (fromStatus === "cancelled" || fromStatus === "completed") {
+        return res.status(400).json({ message: "Invalid status transition: already completed/cancelled" });
+      }
+      if (fromStatus === "approved" && (toStatus === "pending" || toStatus === "under_review")) {
+        return res.status(400).json({ message: "Invalid status transition" });
+      }
+
+      if (toStatus === "under_review") {
+        const record = await prisma.$transaction(async (tx) => {
+          await tx.sales_orders.update({
+            where: { id: currentRequest.sales_order_id },
+            data: { status: "under_review" }
+          });
+          return await tx.cancellation_requests.update({
+            where: { id },
+            data: cleanedData,
+            ...(include ? { include } : {})
+          });
+        });
+        return res.json(mapRelations(modelName, record));
+      }
+
+      if (toStatus === "approved") {
+        let settings = { cancellation_charge_percent: 0.5, cancellation_gst_rate: 18 };
+        try {
+          const settingsData = await fs.readFile(SETTINGS_FILE, "utf-8");
+          settings = JSON.parse(settingsData);
+        } catch (err) {
+          console.warn("Failed to load settings file, using defaults", err);
+        }
+
+        const salesOrderId = currentRequest.sales_order_id;
+        const customerId = currentRequest.customer_id;
+
+        const summary = await getLedgerSummary(salesOrderId, prisma);
+        const agreementValue = summary.agreementValue;
+        
+        // Cancellation Fee is 0.5% of Agreement Value
+        const cancellationCharges = agreementValue * 0.005;
+        // Other Recoverable Charges is stored in forfeiture_amount
+        const otherRecoverableCharges = Number(cleanedData.forfeiture_amount ?? currentRequest.forfeiture_amount ?? 0);
+        
+        const totalInterest = summary.totalInterest;
+        const amountPaid = summary.amountPaid;
+        const refundAmount = amountPaid - cancellationCharges - totalInterest - otherRecoverableCharges;
+
+        const record = await prisma.$transaction(async (tx) => {
+          const existingEntries = await tx.ledger.findMany({
+            where: {
+              sales_order_id: salesOrderId,
+              ledger_reference_type: "Cancellation",
+              cancellation_request_id: id
+            }
+          });
+          const hasPosted = existingEntries.length > 0;
+
+          await tx.sales_orders.update({
+            where: { id: salesOrderId },
+            data: {
+              status: "cancelled",
+              cancellation_date: new Date()
+            }
+          });
+
+          await tx.units.update({
+            where: { id: currentRequest.sales_orders.unit_id },
+            data: { status: "cancelled" }
+          });
+
+          const updatedRequest = await tx.cancellation_requests.update({
+            where: { id },
+            data: {
+              ...cleanedData,
+              cancellation_charges: cancellationCharges,
+              forfeiture_amount: otherRecoverableCharges,
+              refundable_amount: refundAmount,
+              penalty_percentage: 0.5
+            },
+            ...(include ? { include } : {})
+          });
+
+          if (!hasPosted) {
+            const demands = await tx.demand_letters.findMany({
+              where: { sales_order_id: salesOrderId, status: { not: "cancelled" } }
+            });
+
+            for (const d of demands) {
+              const principal = Number(d.principal_amount || 0);
+              if (principal > 0) {
+                await postLedgerEntry(tx, {
+                  sales_order_id: salesOrderId,
+                  customer_id: customerId,
+                  transaction_type: "MILESTONE_REVERSAL",
+                  amount: -principal,
+                  reference_date: new Date(),
+                  description: `Reversal of Demand Principal [Ref: ${d.demand_number}]`,
+                  ledger_reference_type: "Cancellation",
+                  ledger_reference_id: id,
+                  cancellation_request_id: id,
+                  reference_no: d.demand_number,
+                  financial_snapshot_version: 1
+                });
+              }
+              const gst = Number(d.other_charges || 0);
+              if (gst > 0) {
+                await postLedgerEntry(tx, {
+                  sales_order_id: salesOrderId,
+                  customer_id: customerId,
+                  transaction_type: "GST_REVERSAL",
+                  amount: -gst,
+                  reference_date: new Date(),
+                  description: `Reversal of Demand GST [Ref: ${d.demand_number}]`,
+                  ledger_reference_type: "Cancellation",
+                  ledger_reference_id: id,
+                  cancellation_request_id: id,
+                  reference_no: d.demand_number,
+                  financial_snapshot_version: 1
+                });
+              }
+            }
+
+            // Update status of reversed demand letters to cancelled
+            await tx.demand_letters.updateMany({
+              where: { sales_order_id: salesOrderId, status: { not: "cancelled" } },
+              data: { status: "cancelled" }
+            });
+
+            if (cancellationCharges > 0) {
+              await postLedgerEntry(tx, {
+                sales_order_id: salesOrderId,
+                customer_id: customerId,
+                transaction_type: "CANCELLATION_CHARGE",
+                amount: cancellationCharges,
+                reference_date: new Date(),
+                description: `Agreement Cancellation Fee (0.5% of Agreement Value)`,
+                ledger_reference_type: "Cancellation",
+                ledger_reference_id: id,
+                cancellation_request_id: id,
+                reference_no: currentRequest.request_number,
+                financial_snapshot_version: 1
+              });
+            }
+            if (otherRecoverableCharges > 0) {
+              await postLedgerEntry(tx, {
+                sales_order_id: salesOrderId,
+                customer_id: customerId,
+                transaction_type: "CANCELLATION_GST",
+                amount: otherRecoverableCharges,
+                reference_date: new Date(),
+                description: `Other Recoverable Charges (Maintenance, Documentation, Legal, etc.)`,
+                ledger_reference_type: "Cancellation",
+                ledger_reference_id: id,
+                cancellation_request_id: id,
+                reference_no: currentRequest.request_number,
+                financial_snapshot_version: 1
+              });
+            }
+          }
+
+          return updatedRequest;
+        });
+
+        await syncHistoricalInterest(currentRequest.customer_id, prisma);
+        const mapped = mapRelations(modelName, record);
+        const finalSummary = await getLedgerSummary(salesOrderId, prisma);
+        mapped.refund_amount = finalSummary.refundableAmount;
+        mapped.refundable_amount = finalSummary.refundableAmount;
+        return res.json(mapped);
+      }
+
+      if (toStatus === "revoked" || toStatus === "rejected") {
+        const salesOrderId = currentRequest.sales_order_id;
+
+        const record = await prisma.$transaction(async (tx) => {
+          await FinancialCalculationService.restoreBooking(salesOrderId, prisma, tx, currentRequest.sales_orders.unit_id);
+
+          const updatedRequest = await tx.cancellation_requests.update({
+            where: { id },
+            data: {
+              status: toStatus,
+              approval_date: null
+            },
+            ...(include ? { include } : {})
+          });
+
+          if (fromStatus === "approved") {
+            const existingReversals = await tx.ledger.findMany({
+              where: {
+                sales_order_id: salesOrderId,
+                ledger_reference_type: "CancellationReversal",
+                cancellation_request_id: id
+              }
+            });
+            const hasReversed = existingReversals.length > 0;
+
+            if (!hasReversed) {
+              await FinancialCalculationService.reverseCancellation(salesOrderId, prisma, tx, id);
+            }
+          }
+
+          return updatedRequest;
+        });
+
+        await syncHistoricalInterest(currentRequest.customer_id, prisma);
+        const mapped = mapRelations(modelName, record);
+        return res.json(mapped);
+      }
+    }
+
+    if (modelName === "refund_requests") {
+      const currentRequest = await prisma.refund_requests.findUnique({
+        where: { id }
+      });
+      if (!currentRequest) {
+        return res.status(404).json({ message: "Refund request not found" });
+      }
+
+      const fromStatus = currentRequest.status;
+      const toStatus = cleanedData.status;
+
+      if (fromStatus === "disbursed") {
+        return res.status(400).json({ message: "Refund has already been disbursed and cannot be modified" });
+      }
+
+      if (toStatus === "disbursed") {
+        const record = await prisma.$transaction(async (tx) => {
+          const jvNo = `JV-REF-${Date.now().toString(36).toUpperCase()}`;
+
+          await postLedgerEntry(tx, {
+            sales_order_id: currentRequest.sales_order_id,
+            customer_id: currentRequest.customer_id,
+            transaction_type: "REFUND",
+            amount: Number(currentRequest.refund_amount),
+            reference_date: new Date(),
+            description: "Refund paid against cancelled booking",
+            reference_no: currentRequest.request_number,
+            journal_voucher_no: jvNo,
+            ledger_reference_type: "RefundRequest",
+            ledger_reference_id: currentRequest.id,
+            created_by: req.user?.id || null
+          });
+
+          return await tx.refund_requests.update({
+            where: { id },
+            data: {
+              ...cleanedData,
+              disbursed_by: req.user?.id || null,
+              disbursement_date: new Date(),
+              journal_voucher_no: jvNo,
+              transaction_reference: cleanedData.transaction_reference || currentRequest.transaction_reference || `REF-TR-${Date.now()}`
+            },
+            ...(include ? { include } : {})
+          });
+        });
+
+        await syncHistoricalInterest(currentRequest.customer_id, prisma);
+        return res.json(mapRelations(modelName, record));
+      }
+    }
+
     const record = await prisma[modelName].update({
       where: { id },
       data: cleanedData,
       ...(include ? { include } : {})
     });
 
-    return res.json(mapRelations(modelName, record));
+    const mapped = mapRelations(modelName, record);
+    if (modelName === "cancellation_requests" && (mapped.status === "approved" || mapped.status === "completed")) {
+      mapped.refund_amount = await calculateRefundFromLedger(mapped.sales_order_id, prisma);
+      mapped.refundable_amount = mapped.refund_amount;
+    }
+    return res.json(mapped);
   } catch (error) {
     if (error.code === 'P2025') {
        return res.status(404).json({ message: "Record not found" });
@@ -1043,10 +2248,20 @@ app.delete("/api/entities/:entity/:id", authenticateToken, async (req, res) => {
     }
 
     if (modelName === "sales_orders") {
+      const order = await prisma.sales_orders.findUnique({
+        where: { id },
+        select: { unit_id: true }
+      });
+      if (order && order.unit_id) {
+        await prisma.units.update({
+          where: { id: order.unit_id },
+          data: { status: "available" }
+        });
+      }
       // Delete all related records first to avoid foreign key constraint violations
-      await prisma.payment_schedules.deleteMany({ where: { sales_order_id: id } });
-      await prisma.customer_receipts.deleteMany({ where: { sales_order_id: id } });
       await prisma.demand_letters.deleteMany({ where: { sales_order_id: id } });
+      await prisma.customer_receipts.deleteMany({ where: { sales_order_id: id } });
+      await prisma.payment_schedules.deleteMany({ where: { sales_order_id: id } });
       await prisma.interest_entries.deleteMany({ where: { sales_order_id: id } });
       await prisma.interest_settlements.deleteMany({ where: { sales_order_id: id } });
       await prisma.interest_waiver_requests.deleteMany({ where: { sales_order_id: id } });
@@ -1059,6 +2274,48 @@ app.delete("/api/entities/:entity/:id", authenticateToken, async (req, res) => {
       await prisma.shifting_requests.deleteMany({ where: { sales_order_id: id } });
       await prisma.fpv_calculations.deleteMany({ where: { sales_order_id: id } });
       await prisma.agreement_details.deleteMany({ where: { sales_order_id: id } });
+    }
+
+    if (modelName === "customers") {
+      const orders = await prisma.sales_orders.findMany({
+        where: { customer_id: id },
+        select: { id: true, unit_id: true }
+      });
+      const orderIds = orders.map(o => o.id);
+      const unitIds = orders.map(o => o.unit_id).filter(Boolean);
+
+      if (unitIds.length > 0) {
+        await prisma.units.updateMany({
+          where: { id: { in: unitIds } },
+          data: { status: "available" }
+        });
+      }
+
+      await prisma.ledger.deleteMany({ where: { customer_id: id } });
+      await prisma.demand_letters.deleteMany({ where: { customer_id: id } });
+      await prisma.customer_receipts.deleteMany({ where: { customer_id: id } });
+      await prisma.payment_schedules.deleteMany({ where: { sales_order_id: { in: orderIds } } });
+      await prisma.agreement_details.deleteMany({ where: { sales_order_id: { in: orderIds } } });
+
+      await prisma.interest_entries.deleteMany({ where: { customer_id: id } });
+      await prisma.interest_settlements.deleteMany({ where: { customer_id: id } });
+      await prisma.interest_waiver_requests.deleteMany({ where: { customer_id: id } });
+      await prisma.bank_documents.deleteMany({ where: { customer_id: id } });
+      await prisma.client_tds_records.deleteMany({ where: { customer_id: id } });
+      await prisma.cancellation_requests.deleteMany({ where: { customer_id: id } });
+      await prisma.refund_requests.deleteMany({ where: { customer_id: id } });
+      await prisma.handover_requests.deleteMany({ where: { customer_id: id } });
+      await prisma.resale_requests.deleteMany({
+        where: {
+          OR: [
+            { original_customer_id: id },
+            { new_customer_id: id }
+          ]
+        }
+      });
+      await prisma.shifting_requests.deleteMany({ where: { customer_id: id } });
+      await prisma.fpv_calculations.deleteMany({ where: { customer_id: id } });
+      await prisma.sales_orders.deleteMany({ where: { customer_id: id } });
     }
 
     await prisma[modelName].delete({
@@ -1125,7 +2382,8 @@ app.post("/api/entities/:entity/bulk", authenticateToken, async (req, res) => {
 
           const startStr = new Date(item.period_from).toLocaleDateString("en-IN");
           const calcStr = new Date(item.period_to).toLocaleDateString("en-IN");
-          const description = `Delayed payment interest for the period of ${startStr} to ${calcStr}`;
+          const days = Number(item.days || item.days_overdue || 0);
+          const description = `Delayed payment interest for the period of ${startStr} to ${calcStr} (${days} days)`;
 
           await tx.ledger.create({
             data: {
@@ -1204,29 +2462,29 @@ app.post("/api/receipts/:id/bounce", authenticateToken, async (req, res) => {
       const penaltyFee = 500.00;
 
       // 3. Create Ledger Reversal Entry
-      const reversalLedger = await tx.ledger.create({
-        data: {
-          sales_order_id: receipt.sales_order_id,
-          customer_id: receipt.customer_id,
-          transaction_type: "REVERSAL",
-          amount: amount,
-          reference_date: new Date(),
-          description: `Reversal of Receipt #${receipt.receipt_number} due to Cheque Bounce.`,
-          status: "UNPAID"
-        }
+      const reversalLedger = await postLedgerEntry(tx, {
+        sales_order_id: receipt.sales_order_id,
+        customer_id: receipt.customer_id,
+        transaction_type: "RECEIPT_REVERSAL",
+        amount: amount,
+        reference_date: new Date(),
+        description: `Reversal of Receipt #${receipt.receipt_number} due to Cheque Bounce.`,
+        reference_no: receipt.receipt_number,
+        ledger_reference_type: "ReceiptBounce",
+        ledger_reference_id: receipt.id
       });
 
       // 4. Create Penalty Ledger Entry
-      const penaltyLedger = await tx.ledger.create({
-        data: {
-          sales_order_id: receipt.sales_order_id,
-          customer_id: receipt.customer_id,
-          transaction_type: "PENALTY",
-          amount: penaltyFee,
-          reference_date: new Date(),
-          description: "Cheque Bounce Penalty Charge.",
-          status: "UNPAID"
-        }
+      const penaltyLedger = await postLedgerEntry(tx, {
+        sales_order_id: receipt.sales_order_id,
+        customer_id: receipt.customer_id,
+        transaction_type: "PENALTY",
+        amount: penaltyFee,
+        reference_date: new Date(),
+        description: "Cheque Bounce Penalty Charge.",
+        reference_no: receipt.receipt_number,
+        ledger_reference_type: "ReceiptBounce",
+        ledger_reference_id: receipt.id
       });
 
       // 5. Update Customer master total_outstanding_balance

@@ -1,7 +1,11 @@
 import express from "express";
 import { PrismaClient } from "@prisma/client";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { calculateUnitPricing } from "../../src/lib/unitPricing.js";
 import { postDelayedInterestToLedger, syncHistoricalInterest } from "../utils/interestCalculator.js";
+import { calculateCustomerLedgerBalance } from "../utils/ledgerBalance.js";
+import { getLedgerSummary, getLedgerSummarySync } from "../utils/ledgerFinancialService.js";
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -365,7 +369,6 @@ router.get("/ledger/customers", async (req, res) => {
 router.get("/ledger/units", async (req, res) => {
   try {
     const orders = await prisma.sales_orders.findMany({
-      where: { status: { notIn: ["cancelled", "resale"] } },
       include: {
         units: {
           include: {
@@ -413,12 +416,43 @@ router.get("/ledger/:unitId", async (req, res) => {
     const asOfDateStr = req.query.as_of_date;
     const asOfDate = asOfDateStr ? new Date(asOfDateStr) : new Date();
 
-    const order = await prisma.sales_orders.findFirst({
-      where: { unit_id: unitId, status: { notIn: ["cancelled", "resale"] } }
+    let order = await prisma.sales_orders.findFirst({
+      where: { unit_id: unitId, status: { notIn: ["cancelled", "resale"] } },
+      include: {
+        demand_letters: true,
+        customer_receipts: true,
+        ledger: true,
+        cancellation_requests: {
+          where: {
+            status: { notIn: ["revoked", "rejected"] }
+          },
+          orderBy: { created_at: "desc" },
+          take: 1
+        }
+      }
     });
 
     if (!order) {
-      return res.status(404).json({ detail: "No active sales order found for this unit." });
+      order = await prisma.sales_orders.findFirst({
+        where: { unit_id: unitId },
+        orderBy: { updated_at: "desc" },
+        include: {
+          demand_letters: true,
+          customer_receipts: true,
+          ledger: true,
+          cancellation_requests: {
+            where: {
+              status: { notIn: ["revoked", "rejected"] }
+            },
+            orderBy: { created_at: "desc" },
+            take: 1
+          }
+        }
+      });
+    }
+
+    if (!order) {
+      return res.status(404).json({ detail: "No sales order found for this unit." });
     }
 
     const customerId = order.customer_id;
@@ -426,161 +460,58 @@ router.get("/ledger/:unitId", async (req, res) => {
     // Run dynamic interest sync inside Express backend for this customer
     await syncHistoricalInterest(customerId, prisma);
 
-    // Retrieve all relevant transaction types from core tables
-    const demands = await prisma.demand_letters.findMany({
-      where: { sales_order_id: order.id, status: { not: "cancelled" } },
-      include: { payment_schedules: true }
-    });
-
-    const receipts = await prisma.customer_receipts.findMany({
-      where: { sales_order_id: order.id, status: { not: "bounced" } }
-    });
-
-    const adjustments = await prisma.ledger.findMany({
-      where: { sales_order_id: order.id }
-    });
-
-    const entries = [];
-
-    // Map demands: Installment + Tax
-    demands.forEach(d => {
-      // Installment debit
-      entries.push({
-        id: d.id,
-        transaction_date: d.demand_date,
-        consideration_date: d.due_date || d.demand_date,
-        type: "Installment",
-        narration: `Milestone: ${d.payment_schedules?.milestone_name || d.demand_type || "Installment"}`,
-        debit: Number(d.principal_amount || 0),
-        credit: 0,
-        is_posted: true
-      });
-
-      // Tax debit (GST)
-      const gst = Number(d.other_charges || 0);
-      if (gst > 0) {
-        entries.push({
-          id: d.id + "_tax",
-          transaction_date: d.demand_date,
-          consideration_date: d.due_date || d.demand_date,
-          type: "Tax",
-          narration: `GST on ${d.payment_schedules?.milestone_name || d.demand_type || "Installment"}`,
-          debit: gst,
-          credit: 0,
-          is_posted: true
-        });
-      }
-
-      // Overdue interest posted in demand letter
-      const interest = Number(d.interest_amount || 0);
-      if (interest > 0) {
-        entries.push({
-          id: d.id + "_interest",
-          transaction_date: d.demand_date,
-          consideration_date: d.demand_date,
-          type: "Interest",
-          narration: `Interest on overdue demands - Letter Ref: ${d.demand_number}`,
-          debit: interest,
-          credit: 0,
-          is_posted: true
-        });
-      }
-
-      // GST on interest
-      const interestGst = Number(d.gst_on_interest || 0);
-      if (interestGst > 0) {
-        entries.push({
-          id: d.id + "_interest_gst",
-          transaction_date: d.demand_date,
-          consideration_date: d.demand_date,
-          type: "Tax",
-          narration: `18% GST on Interest - Letter Ref: ${d.demand_number}`,
-          debit: interestGst,
-          credit: 0,
-          is_posted: true
-        });
+    // Re-fetch order to include fresh interest entries
+    const freshOrder = await prisma.sales_orders.findUnique({
+      where: { id: order.id },
+      include: {
+        demand_letters: true,
+        customer_receipts: true,
+        ledger: true,
+        cancellation_requests: {
+          where: {
+            status: { notIn: ["revoked", "rejected"] }
+          },
+          orderBy: { created_at: "desc" },
+          take: 1
+        }
       }
     });
 
-    // Map receipts: Receipt + TDS
-    receipts.forEach(r => {
-      // Clear/received credit
-      entries.push({
-        id: r.id,
-        transaction_date: r.receipt_date,
-        consideration_date: r.consideration_date || r.receipt_date,
-        type: "Receipt",
-        narration: `Receipt - ${r.payment_mode || "NEFT"} ${r.receipt_number || ""} (${r.narration || "Payment"})`,
-        debit: 0,
-        credit: Number(r.amount || 0),
-        is_posted: true
-      });
-
-      // TDS credit
-      const tds = Number(r.tds_amount || 0);
-      if (tds > 0) {
-        entries.push({
-          id: r.id + "_tds",
-          transaction_date: r.receipt_date,
-          consideration_date: r.consideration_date || r.receipt_date,
-          type: "TDS",
-          narration: `TDS Credit on Receipt ${r.receipt_number || ""}`,
-          debit: 0,
-          credit: tds,
-          is_posted: true
-        });
-      }
-    });
-
-    // Map adjustments
-    adjustments.forEach(l => {
-      const isInterest = l.transaction_type === "LATE_FEE_INTEREST";
-      const amount = Number(l.amount || 0);
-      const isCredit = l.transaction_type.includes("WAIVER") || l.transaction_type.includes("CREDIT") || amount < 0;
-
-      entries.push({
-        id: l.id,
-        transaction_date: l.reference_date,
-        consideration_date: l.reference_date,
-        type: isInterest ? "Interest" : "Adjustment",
-        narration: l.description || l.transaction_type,
-        debit: isCredit ? 0 : Math.abs(amount),
-        credit: isCredit ? Math.abs(amount) : 0,
-        is_posted: true
-      });
-    });
-
-    // Sort chronologically
-    entries.sort((a, b) => {
-      const dateA = new Date(a.transaction_date).getTime();
-      const dateB = new Date(b.transaction_date).getTime();
-      if (dateA !== dateB) return dateA - dateB;
-      
-      const priorityA = a.debit > 0 ? 1 : 2;
-      const priorityB = b.debit > 0 ? 1 : 2;
-      return priorityA - priorityB;
-    });
-
-    // Calculate pro-rata running balance
-    let running_balance = 0;
-    const finalEntries = entries.map(e => {
-      running_balance = running_balance + e.debit - e.credit;
-      return {
-        ...e,
-        net_balance: running_balance
-      };
-    });
+    const summary = getLedgerSummarySync(freshOrder);
 
     res.json({
       customer_id: customerId,
       unit_id: unitId,
       as_of_date: asOfDate.toISOString().split("T")[0],
-      total_outstanding_balance: running_balance,
-      ledger_entries: finalEntries
+      total_outstanding_balance: summary.outstandingBalance,
+      total_receipts: summary.amountPaid,
+      total_interest: summary.totalInterest,
+      estimated_refund: summary.refundableAmount,
+      cancellation_charges: summary.cancellationCharges,
+      cancellation_gst: summary.gstOnCancellation,
+      total_deduction: summary.totalRecoveries,
+      ledger_entries: summary.ledgerEntries,
+      order_status: freshOrder.status,
+      net_payable: summary.netPayable,
+      total_recoveries: summary.totalRecoveries,
+      settlement_status: summary.settlementStatus,
+      milestone_principal_reversed: summary.milestonePrincipalReversed
     });
   } catch (error) {
     console.error("Error retrieving ledger:", error);
     res.status(500).json({ detail: error.message });
+  }
+});
+
+// GET /pricing/ledger-summary/:salesOrderId
+router.get("/ledger-summary/:salesOrderId", async (req, res) => {
+  try {
+    const { salesOrderId } = req.params;
+    const summary = await getLedgerSummary(salesOrderId, prisma);
+    res.json(summary);
+  } catch (error) {
+    console.error("Error fetching ledger summary:", error);
+    res.status(500).json({ message: error.message });
   }
 });
 

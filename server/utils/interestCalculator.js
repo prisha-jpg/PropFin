@@ -146,14 +146,149 @@ function isUtcLastDayOfMonth(date) {
   return d === lastDay;
 }
 
+/**
+ * Shared helper function to calculate month-by-month delayed payment interest breakdown for a demand milestone.
+ */
+export function calculateMonthlyBreakdown({
+  principalAmount,
+  dueDate,
+  payments,
+  annualPenaltyRate,
+  calculationEndDate,
+  isFinalSettlement
+}) {
+  const rate = Number(annualPenaltyRate);
+  const dueUtc = parseDateToUtc(dueDate);
+  const calcEndUtc = parseDateToUtc(calculationEndDate);
+
+  // Group payments by date to simplify timeline
+  const uniquePaymentsMap = new Map();
+  for (const p of payments) {
+    const d = parseDateToUtc(p.date);
+    const dateKey = d.getTime();
+    uniquePaymentsMap.set(dateKey, (uniquePaymentsMap.get(dateKey) || 0) + Number(p.amount));
+  }
+  const groupedPayments = Array.from(uniquePaymentsMap.entries()).map(([time, amount]) => ({
+    date: new Date(time),
+    amount
+  })).sort((a, b) => a.date - b.date);
+
+  // 1. Before Due Date: receipts received on or before milestone due date reduce initial outstanding
+  let outstandingOnDueDate = Number(principalAmount);
+  const latePayments = [];
+
+  for (const gp of groupedPayments) {
+    if (gp.date <= dueUtc) {
+      outstandingOnDueDate -= gp.amount;
+    } else {
+      latePayments.push(gp);
+    }
+  }
+
+  if (outstandingOnDueDate <= 0) {
+    return []; // No delayed payment interest if paid on or before due date
+  }
+
+  // 2. If Customer Has Not Paid by Due Date
+  const overdueStart = new Date(dueUtc.getTime() + 24 * 60 * 60 * 1000); // Due Date + 1 day
+  
+  if (overdueStart > calcEndUtc) {
+    return [];
+  }
+
+  const monthlyEntries = [];
+
+  let currentYear = overdueStart.getUTCFullYear();
+  let currentMonth = overdueStart.getUTCMonth(); // 0-indexed
+  const endYear = calcEndUtc.getUTCFullYear();
+  const endMonth = calcEndUtc.getUTCMonth();
+
+  let runningOutstanding = outstandingOnDueDate;
+
+  while (
+    (currentYear < endYear || (currentYear === endYear && currentMonth <= endMonth)) &&
+    runningOutstanding > 0
+  ) {
+    const firstDayOfMonth = new Date(Date.UTC(currentYear, currentMonth, 1));
+    const lastDayOfMonth = new Date(Date.UTC(currentYear, currentMonth + 1, 0));
+
+    const rangeStart = overdueStart > firstDayOfMonth ? overdueStart : firstDayOfMonth;
+    const rangeEnd = calcEndUtc < lastDayOfMonth ? calcEndUtc : lastDayOfMonth;
+
+    if (rangeStart <= rangeEnd) {
+      const timeDiff = rangeEnd.getTime() - rangeStart.getTime();
+      const daysInMonth = Math.round(timeDiff / (1000 * 60 * 60 * 24)) + 1;
+
+      // Slice the month range [rangeStart, rangeEnd] into sub-periods based on payment dates
+      const monthPayments = latePayments.filter(p => p.date >= rangeStart && p.date <= rangeEnd);
+
+      let monthInterestSum = 0;
+      let currentStart = new Date(rangeStart);
+
+      for (const lp of monthPayments) {
+        if (runningOutstanding <= 0) break;
+        if (lp.date > currentStart) {
+          const days = Math.round((lp.date.getTime() - currentStart.getTime()) / (1000 * 60 * 60 * 24));
+          if (days > 0 && runningOutstanding > 0) {
+            monthInterestSum += (runningOutstanding * rate * days) / (365 * 100);
+          }
+        }
+        currentStart = new Date(lp.date);
+        runningOutstanding -= lp.amount;
+      }
+
+      // Final sub-period from currentStart to rangeEnd
+      if (currentStart <= rangeEnd && runningOutstanding > 0) {
+        const days = Math.round((rangeEnd.getTime() - currentStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        if (days > 0 && runningOutstanding > 0) {
+          monthInterestSum += (runningOutstanding * rate * days) / (365 * 100);
+        }
+      }
+
+      const roundedInterest = Math.round((monthInterestSum + Number.EPSILON) * 100) / 100;
+      const gstAmount = 0.00;
+      const totalAmount = roundedInterest;
+
+      // Add monthly interest to running balance at the end of the month
+      runningOutstanding = runningOutstanding + roundedInterest;
+
+      if (totalAmount > 0) {
+        const isLastDay = isUtcLastDayOfMonth(rangeEnd);
+        const isMilestoneFullyPaidHere = runningOutstanding <= 0;
+
+        if (isLastDay || isFinalSettlement || isMilestoneFullyPaidHere) {
+          monthlyEntries.push({
+            rangeStart,
+            rangeEnd,
+            daysOverdue: daysInMonth,
+            roundedInterest,
+            gstAmount,
+            totalAmount
+          });
+        }
+      }
+
+      if (runningOutstanding < 0) {
+        runningOutstanding = 0;
+      }
+    }
+
+    if (currentMonth === 11) {
+      currentMonth = 0;
+      currentYear += 1;
+    } else {
+      currentMonth += 1;
+    }
+  }
+
+  return monthlyEntries;
+}
+
 export async function postDelayedInterestToLedger(prismaInstance, params) {
-  // Extract inputs, supporting both the old and new parameter formats
   const salesOrderId = params.salesOrderId || params.sales_order_id;
   const customerId = params.customerId || params.customer_id;
   
   const milestoneDemand = params.milestoneDemand !== undefined ? params.milestoneDemand : params.outstandingPrincipal;
-  const amountPaid = params.amountPaid !== undefined ? params.amountPaid : 0;
-  
   const annualPenaltyRate = params.annual_interest_rate !== undefined ? params.annual_interest_rate : params.annualPenaltyRate;
   const demandLetterDate = params.dueDate !== undefined ? params.dueDate : params.demandLetterDate;
   
@@ -165,18 +300,12 @@ export async function postDelayedInterestToLedger(prismaInstance, params) {
   if (!salesOrderId) throw new Error("salesOrderId is required.");
   if (!customerId) throw new Error("customerId is required.");
 
-  // Parse dates to get calendar month name for description and idempotency checks
-  const calcDate = new Date(calculationDate);
-  if (isNaN(calcDate.getTime())) {
-    throw new Error("Invalid calculation date.");
-  }
-
-  // 1. Query database for the last interest posting date for this milestone
+  // 1. Query database for the last interest posting date for this milestone to use for idempotency skips
   const lastInterestEntry = await prismaInstance.ledger.findFirst({
     where: {
       sales_order_id: salesOrderId,
       customer_id: customerId,
-      transaction_type: "LATE_FEE_INTEREST",
+      transaction_type: { in: ["LATE_FEE_INTEREST", "INTEREST"] },
       ...(milestoneName ? {
         description: {
           contains: milestoneName
@@ -188,12 +317,101 @@ export async function postDelayedInterestToLedger(prismaInstance, params) {
     }
   });
 
-  const start = new Date(demandLetterDate);
-  const actualDueDate = new Date(start);
-  actualDueDate.setDate(actualDueDate.getDate() + Number(gracePeriodDays));
+  // Query all demands and receipts for this sales order to run a clean local FIFO allocation
+  const demands = await prismaInstance.demand_letters.findMany({
+    where: {
+      sales_order_id: salesOrderId,
+      status: { not: "cancelled" }
+    },
+    orderBy: { due_date: "asc" }
+  });
 
-  const baseStartDate = lastInterestEntry ? lastInterestEntry.reference_date : actualDueDate;
-  const startUtc = parseDateToUtc(baseStartDate);
+  const receipts = await prismaInstance.customer_receipts.findMany({
+    where: {
+      sales_order_id: salesOrderId,
+      status: { not: "bounced" }
+    },
+    orderBy: { consideration_date: "asc" }
+  });
+
+  // Run the FIFO allocation waterfall
+  const demandsFifo = demands.map(d => ({
+    id: d.id,
+    demand_number: d.demand_number,
+    due_date: d.due_date ? new Date(d.due_date) : null,
+    principal_amount: Number(d.principal_amount) + Number(d.other_charges || 0),
+    remaining_principal: Number(d.principal_amount) + Number(d.other_charges || 0),
+    payment_schedule_id: d.payment_schedule_id,
+    payments: []
+  }));
+
+  const receiptsFifo = receipts.map(r => ({
+    id: r.id,
+    amount: Number(r.amount),
+    remaining_amount: Number(r.amount),
+    consideration_date: r.consideration_date ? new Date(r.consideration_date) : new Date(r.receipt_date)
+  })).sort((a, b) => a.consideration_date - b.consideration_date);
+
+  for (const r of receiptsFifo) {
+    for (const d of demandsFifo) {
+      if (r.remaining_amount <= 0) break;
+      if (!d.due_date) continue;
+      if (d.remaining_principal <= 0) continue;
+
+      const allocated = Math.min(r.remaining_amount, d.remaining_principal);
+      d.payments.push({
+        amount: allocated,
+        date: r.consideration_date
+      });
+      d.remaining_principal -= allocated;
+      r.remaining_amount -= allocated;
+    }
+  }
+
+  // Find the matched demand from FIFO
+  let matchedDemand = null;
+
+  if (milestoneName) {
+    if (milestoneName.startsWith("PRL Demand - ")) {
+      const demandNumber = milestoneName.replace("PRL Demand - ", "").trim();
+      matchedDemand = demandsFifo.find(d => d.demand_number === demandNumber);
+    } else {
+      const schedule = await prismaInstance.payment_schedules.findFirst({
+        where: {
+          sales_order_id: salesOrderId,
+          milestone_name: milestoneName
+        }
+      });
+      if (schedule) {
+        matchedDemand = demandsFifo.find(d => d.payment_schedule_id === schedule.id);
+      }
+    }
+  }
+
+  if (!matchedDemand) {
+    const targetDueTime = parseDateToUtc(demandLetterDate).getTime();
+    matchedDemand = demandsFifo.find(d => {
+      const dDueTime = d.due_date ? parseDateToUtc(d.due_date).getTime() : 0;
+      return dDueTime === targetDueTime && Math.abs(d.principal_amount - Number(milestoneDemand)) < 0.01;
+    });
+  }
+
+  // Fallback if not found in database (e.g. standard mock/transient test cases)
+  if (!matchedDemand) {
+    const virtualDueDate = new Date(demandLetterDate);
+    matchedDemand = {
+      principal_amount: Number(milestoneDemand),
+      due_date: virtualDueDate,
+      payments: []
+    };
+  }
+
+  const overdueDueDate = new Date(matchedDemand.due_date);
+  if (gracePeriodDays > 0) {
+    overdueDueDate.setDate(overdueDueDate.getDate() + Number(gracePeriodDays));
+  }
+
+  const startUtc = parseDateToUtc(overdueDueDate);
   const endUtc = parseDateToUtc(calculationDate);
 
   if (startUtc >= endUtc) {
@@ -208,77 +426,14 @@ export async function postDelayedInterestToLedger(prismaInstance, params) {
     };
   }
 
-  const overdueStart = new Date(startUtc.getTime() + 24 * 60 * 60 * 1000);
-  const overdueEnd = endUtc;
-
-  let currentYear = overdueStart.getUTCFullYear();
-  let currentMonth = overdueStart.getUTCMonth(); // 0-indexed
-
-  const endYear = overdueEnd.getUTCFullYear();
-  const endMonth = overdueEnd.getUTCMonth();
-
-  const monthlyEntriesToCreate = [];
-
-  const outstandingPrincipal = Number(milestoneDemand || 0) - Number(amountPaid || 0);
-
-  while (
-    currentYear < endYear || 
-    (currentYear === endYear && currentMonth <= endMonth)
-  ) {
-    const firstDayOfMonth = new Date(Date.UTC(currentYear, currentMonth, 1));
-    const lastDayOfMonth = new Date(Date.UTC(currentYear, currentMonth + 1, 0));
-
-    const rangeStart = overdueStart > firstDayOfMonth ? overdueStart : firstDayOfMonth;
-    const rangeEnd = overdueEnd < lastDayOfMonth ? overdueEnd : lastDayOfMonth;
-
-    if (rangeStart <= rangeEnd) {
-      const timeDiff = rangeEnd.getTime() - rangeStart.getTime();
-      const daysOverdue = Math.round(timeDiff / (1000 * 60 * 60 * 24)) + 1;
-
-      // strictly: (Outstanding_Principal * Annual_Rate * Days_In_Month) / (365 * 100)
-      const interestCalculated = (Number(outstandingPrincipal) * Number(annualPenaltyRate) * daysOverdue) / (365 * 100);
-      const roundedInterest = Math.round((interestCalculated + Number.EPSILON) * 100) / 100;
-      
-      // Calculate 18% GST on each month's interest amount
-      const gstAmount = Math.round((roundedInterest * 0.18 + Number.EPSILON) * 100) / 100;
-      const totalAmount = Math.round((roundedInterest + gstAmount + Number.EPSILON) * 100) / 100;
-
-      console.log(`[Interest Calculation Engine] Variable Log:`, {
-        Outstanding_Principal: Number(outstandingPrincipal),
-        Annual_Rate: Number(annualPenaltyRate),
-        Days_In_Month: daysOverdue,
-        calculatedInterest: interestCalculated,
-        roundedInterest: roundedInterest,
-        gstAmount,
-        totalAmount,
-        period: `${formatUtcDMY(rangeStart)} to ${formatUtcDMY(rangeEnd)}`
-      });
-
-      if (totalAmount > 0) {
-        const isLastDay = isUtcLastDayOfMonth(rangeEnd);
-        const isFinalSettlement = params.isFinalSettlement === true;
-        if (isLastDay || isFinalSettlement) {
-          monthlyEntriesToCreate.push({
-            rangeStart,
-            rangeEnd,
-            daysOverdue,
-            roundedInterest,
-            gstAmount,
-            totalAmount
-          });
-        } else {
-          console.log(`[Interest Calculation Engine] Skipping mid-month posting for ${formatUtcDMY(rangeEnd)} as isFinalSettlement is false.`);
-        }
-      }
-    }
-
-    if (currentMonth === 11) {
-      currentMonth = 0;
-      currentYear += 1;
-    } else {
-      currentMonth += 1;
-    }
-  }
+  const monthlyEntriesToCreate = calculateMonthlyBreakdown({
+    principalAmount: matchedDemand.principal_amount,
+    dueDate: overdueDueDate,
+    payments: matchedDemand.payments,
+    annualPenaltyRate: annualPenaltyRate,
+    calculationEndDate: calculationDate,
+    isFinalSettlement: params.isFinalSettlement === true
+  });
 
   if (monthlyEntriesToCreate.length === 0) {
     const customer = await prismaInstance.customers.findUnique({
@@ -301,7 +456,7 @@ export async function postDelayedInterestToLedger(prismaInstance, params) {
         where: {
           sales_order_id: salesOrderId,
           customer_id: customerId,
-          transaction_type: "LATE_FEE_INTEREST",
+          transaction_type: { in: ["LATE_FEE_INTEREST", "INTEREST"] },
           reference_date: item.rangeEnd,
           ...(milestoneName ? {
             description: {
@@ -316,18 +471,30 @@ export async function postDelayedInterestToLedger(prismaInstance, params) {
       }
 
       const description = milestoneName
-        ? `Delayed payment interest for ${milestoneName} for the period of ${formatUtcDMY(item.rangeStart)} to ${formatUtcDMY(item.rangeEnd)}`
-        : `Delayed payment interest for the period of ${formatUtcDMY(item.rangeStart)} to ${formatUtcDMY(item.rangeEnd)}`;
+        ? `Delayed payment interest for ${milestoneName} for the period of ${formatUtcDMY(item.rangeStart)} to ${formatUtcDMY(item.rangeEnd)} (${item.daysOverdue} days)`
+        : `Delayed payment interest for the period of ${formatUtcDMY(item.rangeStart)} to ${formatUtcDMY(item.rangeEnd)} (${item.daysOverdue} days)`;
+
+      const debitVal = Number(item.totalAmount);
+      const lastEntry = await tx.ledger.findFirst({
+        where: { customer_id: customerId },
+        orderBy: { created_at: "desc" }
+      });
+      const prevBalance = lastEntry ? Number(lastEntry.running_balance || 0) : 0;
+      const runningBalance = prevBalance + debitVal;
 
       const newLedgerEntry = await tx.ledger.create({
         data: {
           sales_order_id: salesOrderId,
           customer_id: customerId,
-          transaction_type: "LATE_FEE_INTEREST",
+          transaction_type: "INTEREST",
           amount: item.totalAmount,
           reference_date: item.rangeEnd,
           description: description,
-          status: "UNPAID"
+          status: "UNPAID",
+          debit: debitVal,
+          credit: 0,
+          running_balance: runningBalance,
+          reference_no: milestoneName ? `INT-${milestoneName}` : `INT-${salesOrderId}`
         }
       });
 
@@ -384,19 +551,49 @@ export async function postDelayedInterestToLedger(prismaInstance, params) {
 export async function syncHistoricalInterest(customerId, tx) {
   const today = new Date();
 
+  // Fetch latest completed interest run to get the active interest rate dynamically
+  const latestRun = await tx.interest_calculation_runs.findFirst({
+    where: { status: "completed" },
+    orderBy: { run_date: "desc" }
+  });
+  
+  let dynamicRate = 18.0;
+  if (latestRun && latestRun.interest_rate) {
+    dynamicRate = Number(latestRun.interest_rate);
+    if (dynamicRate <= 1) {
+      dynamicRate = dynamicRate * 100;
+    }
+  } else {
+    // Try to get the rate from the latest interest_entries record
+    const latestEntry = await tx.interest_entries.findFirst({
+      where: { interest_rate: { not: null } },
+      orderBy: { created_at: "desc" }
+    });
+    if (latestEntry && latestEntry.interest_rate) {
+      dynamicRate = Number(latestEntry.interest_rate);
+      if (dynamicRate <= 1) {
+        dynamicRate = dynamicRate * 100;
+      }
+    }
+  }
+
   // Fetch active sales orders for this customer
   const salesOrders = await tx.sales_orders.findMany({
     where: {
-      customer_id: customerId,
-      status: { notIn: ["cancelled", "resale"] }
+      customer_id: customerId
     }
   });
 
-  // 1. Delete all existing interest entries for this customer to ensure clean calculation from scratch
+  const activeOrderIds = salesOrders
+    .filter(o => o.status !== "cancelled" && o.status !== "resale")
+    .map(o => o.id);
+
+  // 1. Delete existing interest entries only for active sales orders for this customer to ensure clean calculation from scratch
   await tx.ledger.deleteMany({
     where: {
       customer_id: customerId,
-      transaction_type: "LATE_FEE_INTEREST"
+      sales_order_id: { in: activeOrderIds },
+      transaction_type: { in: ["LATE_FEE_INTEREST", "INTEREST"] }
     }
   });
 
@@ -404,7 +601,7 @@ export async function syncHistoricalInterest(customerId, tx) {
   const nonInterestLedgers = await tx.ledger.findMany({
     where: {
       customer_id: customerId,
-      transaction_type: { not: "LATE_FEE_INTEREST" }
+      transaction_type: { notIn: ["LATE_FEE_INTEREST", "INTEREST"] }
     }
   });
 
@@ -412,10 +609,17 @@ export async function syncHistoricalInterest(customerId, tx) {
   let baseOutstanding = 0;
 
   for (const order of salesOrders) {
+    const hasReversals = await tx.ledger.findFirst({
+      where: {
+        sales_order_id: order.id,
+        transaction_type: "MILESTONE_REVERSAL"
+      }
+    });
+
     const allDemands = await tx.demand_letters.findMany({
       where: {
         sales_order_id: order.id,
-        status: { not: "cancelled" }
+        ...(hasReversals ? {} : { status: { not: "cancelled" } })
       }
     });
     allDemands.forEach(d => {
@@ -438,9 +642,28 @@ export async function syncHistoricalInterest(customerId, tx) {
     baseOutstanding += Number(l.amount || 0);
   });
 
+  // Fetch all LATE_FEE_INTEREST entries of cancelled/resale orders and add to baseOutstanding
+  const cancelledOrderIds = salesOrders
+    .filter(o => o.status === "cancelled" || o.status === "resale")
+    .map(o => o.id);
+
+  if (cancelledOrderIds.length > 0) {
+    const cancelledInterestEntries = await tx.ledger.findMany({
+      where: {
+        customer_id: customerId,
+        sales_order_id: { in: cancelledOrderIds },
+        transaction_type: { in: ["LATE_FEE_INTEREST", "INTEREST"] }
+      }
+    });
+    cancelledInterestEntries.forEach(l => {
+      baseOutstanding += Number(l.amount || 0);
+    });
+  }
+
   let totalNewInterest = 0;
 
   for (const order of salesOrders) {
+    if (order.status === "cancelled" || order.status === "resale") continue;
     // Fetch all unpaid/active demand letters
     const demands = await tx.demand_letters.findMany({
       where: {
@@ -451,11 +674,10 @@ export async function syncHistoricalInterest(customerId, tx) {
       orderBy: { due_date: "asc" }
     });
 
-    // Fetch all cleared receipts
     const receipts = await tx.customer_receipts.findMany({
       where: {
         sales_order_id: order.id,
-        status: "cleared"
+        status: { not: "bounced" }
       },
       orderBy: { consideration_date: "asc" }
     });
@@ -465,8 +687,8 @@ export async function syncHistoricalInterest(customerId, tx) {
       id: d.id,
       demand_number: d.demand_number,
       due_date: d.due_date ? new Date(d.due_date) : null,
-      principal_amount: Number(d.principal_amount),
-      remaining_principal: Number(d.principal_amount),
+      principal_amount: Number(d.principal_amount) + Number(d.other_charges || 0),
+      remaining_principal: Number(d.principal_amount) + Number(d.other_charges || 0),
       payment_schedule_id: d.payment_schedule_id,
       payments: []
     }));
@@ -476,7 +698,7 @@ export async function syncHistoricalInterest(customerId, tx) {
       amount: Number(r.amount),
       remaining_amount: Number(r.amount),
       consideration_date: r.consideration_date ? new Date(r.consideration_date) : new Date(r.receipt_date)
-    }));
+    })).sort((a, b) => a.consideration_date - b.consideration_date);
 
     // Run FIFO allocation waterfall
     for (const r of receiptsFifo) {
@@ -506,108 +728,14 @@ export async function syncHistoricalInterest(customerId, tx) {
       const lastPayment = d.payments.length > 0 ? d.payments[d.payments.length - 1] : null;
       const endDate = isFullyPaid && lastPayment ? lastPayment.date : today;
 
-      // Calculate initial overdue principal before due_date has passed
-      let overduePrincipal = d.principal_amount;
-      const latePayments = [];
-
-      for (const p of d.payments) {
-        if (p.date <= dueDate) {
-          overduePrincipal -= p.amount;
-        } else {
-          latePayments.push(p);
-        }
-      }
-
-      if (overduePrincipal <= 0) continue;
-      if (endDate <= dueDate) continue;
-
-      // Post the late interest to ledger month by month
-      let currentOverduePrincipal = overduePrincipal;
-      const startUtc = parseDateToUtc(dueDate);
-      const endUtc = parseDateToUtc(endDate);
-
-      if (startUtc >= endUtc) {
-        continue;
-      }
-
-      const overdueStart = new Date(startUtc.getTime() + 24 * 60 * 60 * 1000);
-      const overdueEnd = endUtc;
-
-      let currentYear = overdueStart.getUTCFullYear();
-      let currentMonth = overdueStart.getUTCMonth();
-      const endYear = overdueEnd.getUTCFullYear();
-      const endMonth = overdueEnd.getUTCMonth();
-
-      const monthlyEntriesToCreate = [];
-
-      while (
-        currentYear < endYear ||
-        (currentYear === endYear && currentMonth <= endMonth)
-      ) {
-        const firstDayOfMonth = new Date(Date.UTC(currentYear, currentMonth, 1));
-        const lastDayOfMonth = new Date(Date.UTC(currentYear, currentMonth + 1, 0));
-
-        const rangeStart = overdueStart > firstDayOfMonth ? overdueStart : firstDayOfMonth;
-        const rangeEnd = overdueEnd < lastDayOfMonth ? overdueEnd : lastDayOfMonth;
-
-        if (rangeStart <= rangeEnd) {
-          const timeDiff = rangeEnd.getTime() - rangeStart.getTime();
-          const daysOverdue = Math.round(timeDiff / (1000 * 60 * 60 * 24)) + 1;
-
-          // Find any payments made during this month range to calculate interest pro-rata
-          const monthLatePayments = latePayments.filter(p => p.date >= rangeStart && p.date <= rangeEnd)
-            .sort((a, b) => a.date - b.date);
-
-          let monthInterest = 0;
-          let tempDate = rangeStart;
-          let tempPrincipal = currentOverduePrincipal;
-
-          for (const lp of monthLatePayments) {
-            const chunkDays = Math.round((lp.date.getTime() - tempDate.getTime()) / (1000 * 60 * 60 * 24));
-            if (chunkDays > 0) {
-              monthInterest += (tempPrincipal * 18 * chunkDays) / (365 * 100);
-            }
-            tempPrincipal -= lp.amount;
-            tempDate = new Date(lp.date.getTime() + 24 * 60 * 60 * 1000);
-          }
-
-          const remainingDays = Math.round((rangeEnd.getTime() - tempDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-          if (remainingDays > 0 && tempPrincipal > 0) {
-            monthInterest += (tempPrincipal * 18 * remainingDays) / (365 * 100);
-          }
-
-          for (const lp of monthLatePayments) {
-            currentOverduePrincipal -= lp.amount;
-          }
-
-          const roundedInterest = Math.round((monthInterest + Number.EPSILON) * 100) / 100;
-          const gstAmount = Math.round((roundedInterest * 0.18 + Number.EPSILON) * 100) / 100;
-          const totalAmount = Math.round((roundedInterest + gstAmount + Number.EPSILON) * 100) / 100;
-
-          if (totalAmount > 0) {
-            const isLastDay = isUtcLastDayOfMonth(rangeEnd);
-            const isFinalSettlement = rangeEnd.getTime() === endUtc.getTime();
-
-            if (isLastDay || isFinalSettlement) {
-              monthlyEntriesToCreate.push({
-                rangeStart,
-                rangeEnd,
-                daysOverdue,
-                roundedInterest,
-                gstAmount,
-                totalAmount
-              });
-            }
-          }
-        }
-
-        if (currentMonth === 11) {
-          currentMonth = 0;
-          currentYear += 1;
-        } else {
-          currentMonth += 1;
-        }
-      }
+      const monthlyEntriesToCreate = calculateMonthlyBreakdown({
+        principalAmount: d.principal_amount,
+        dueDate: d.due_date,
+        payments: d.payments,
+        annualPenaltyRate: dynamicRate,
+        calculationEndDate: endDate,
+        isFinalSettlement: false
+      });
 
       let milestoneName = "";
       if (d.payment_schedule_id) {
@@ -624,17 +752,29 @@ export async function syncHistoricalInterest(customerId, tx) {
 
       // Create new correct entries
       for (const item of monthlyEntriesToCreate) {
-        const description = `Delayed payment interest for ${milestoneName} [Ref: ${d.demand_number}] for the period of ${formatUtcDMY(item.rangeStart)} to ${formatUtcDMY(item.rangeEnd)}`;
+        const description = `Delayed payment interest for ${milestoneName} [Ref: ${d.demand_number}] for the period of ${formatUtcDMY(item.rangeStart)} to ${formatUtcDMY(item.rangeEnd)} (${item.daysOverdue} days)`;
+
+        const debitVal = Number(item.totalAmount);
+        const lastEntry = await tx.ledger.findFirst({
+          where: { customer_id: customerId },
+          orderBy: { created_at: "desc" }
+        });
+        const prevBalance = lastEntry ? Number(lastEntry.running_balance || 0) : 0;
+        const runningBalance = prevBalance + debitVal;
 
         await tx.ledger.create({
           data: {
             sales_order_id: order.id,
             customer_id: customerId,
-            transaction_type: "LATE_FEE_INTEREST",
+            transaction_type: "INTEREST",
             amount: item.totalAmount,
             reference_date: item.rangeEnd,
             description: description,
-            status: "UNPAID"
+            status: "UNPAID",
+            debit: debitVal,
+            credit: 0,
+            running_balance: runningBalance,
+            reference_no: `INT-${d.demand_number}`
           }
         });
 

@@ -160,8 +160,8 @@ async function runAutomatedCronIntegrationTest() {
     }
 
     // We expect both standard milestone interest and PRL demand interest to be calculated and posted:
-    // Standard milestone: 100k overdue from 2026-05-31 to 2026-06-30 (30 days). Interest = 100000 * 0.18 * 30 / 365 = 1479.45. Incl GST = 1745.75
-    // PRL Demand: 50k overdue from 2026-05-31 to 2026-06-30 (30 days). Interest = 50000 * 0.18 * 30 / 365 = 739.73. Incl GST = 872.88
+    // Standard milestone: 100k overdue from 2026-05-31 to 2026-06-30 (30 days). Interest = 100000 * 0.18 * 30 / 365 = 1479.45.
+    // PRL Demand: 50k overdue from 2026-05-31 to 2026-06-30 (30 days). Interest = 50000 * 0.18 * 30 / 365 = 739.73.
     assert.strictEqual(postedEntries.length, 2);
     
     // Check descriptions and amounts
@@ -171,8 +171,8 @@ async function runAutomatedCronIntegrationTest() {
     assert.ok(standardEntry);
     assert.ok(prlEntry);
 
-    assert.strictEqual(standardEntry.amount, 1745.75);
-    assert.strictEqual(prlEntry.amount, 872.88);
+    assert.strictEqual(standardEntry.amount, 1479.45);
+    assert.strictEqual(prlEntry.amount, 739.73);
 
     console.log("✅ Passed: PRL Demands calculated and segregated successfully inside automated flow!");
 
