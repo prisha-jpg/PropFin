@@ -417,18 +417,18 @@ export default function TeamMembers() {
                 />
               </div>
 
-              {!editingUser && (
-                <div className="space-y-1.5 col-span-2">
-                  <Label className="text-xs font-semibold">Initial Password</Label>
-                  <Input
-                    type="password"
-                    placeholder="Enter default login password"
-                    value={form.password}
-                    onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    className="h-9 text-xs"
-                  />
-                </div>
-              )}
+              <div className="space-y-1.5 col-span-2">
+                <Label className="text-xs font-semibold">
+                  {editingUser ? "Reset Password (Leave blank to keep current)" : "Initial Password"}
+                </Label>
+                <Input
+                  type="password"
+                  placeholder={editingUser ? "Enter new password to reset..." : "Enter default login password..."}
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  className="h-9 text-xs"
+                />
+              </div>
 
               <div className="space-y-1.5 col-span-2">
                 <Label className="text-xs font-semibold">Account Status</Label>
