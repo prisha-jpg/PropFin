@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import {
   Users, FileText, CreditCard, BarChart3, ArrowRightLeft,
   XCircle, DollarSign, Repeat, Tag, Building2, Receipt,
-  Mail, Percent, Settings, TrendingUp, ChevronDown, ChevronRight,
+  Mail, Percent, Settings, ChevronDown, ChevronRight,
   LayoutDashboard, Menu, X, FileCheck, Landmark, Calculator
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";

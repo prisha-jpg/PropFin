@@ -1,0 +1,92 @@
+[
+  {
+    "id": 1,
+    "name": "Booking Amount",
+    "percent": 10,
+    "expectedDate": ""
+  },
+  {
+    "id": 2,
+    "name": "Payable within 15 Days from Agreement Date",
+    "percent": 10,
+    "expectedDate": ""
+  },
+  {
+    "id": 3,
+    "name": "On Completion of Foundation Works",
+    "percent": 10,
+    "expectedDate": "2026-10-30"
+  },
+  {
+    "id": 4,
+    "name": "On Completion of Parking Level 2 Roof slab",
+    "percent": 5,
+    "expectedDate": "2026-12-30"
+  },
+  {
+    "id": 5,
+    "name": "On Completion of Parking Level 5 Roof slab",
+    "percent": 5,
+    "expectedDate": "2027-02-28"
+  },
+  {
+    "id": 6,
+    "name": "On Completion of Third Floor Roof slab",
+    "percent": 5,
+    "expectedDate": "2027-04-30"
+  },
+  {
+    "id": 7,
+    "name": "On Completion of Seventh Floor Roof slab",
+    "percent": 5,
+    "expectedDate": "2027-06-30"
+  },
+  {
+    "id": 8,
+    "name": "On Completion of Eleventh Floor Roof slab",
+    "percent": 5,
+    "expectedDate": "2027-08-31"
+  },
+  {
+    "id": 9,
+    "name": "On Completion of Fifteenth Floor Roof slab",
+    "percent": 5,
+    "expectedDate": "2027-10-31"
+  },
+  {
+    "id": 10,
+    "name": "On Completion of Terrace slab",
+    "percent": 5,
+    "expectedDate": "2027-12-31"
+  },
+  {
+    "id": 11,
+    "name": "On Completion of Internal Block Work",
+    "percent": 5,
+    "expectedDate": "2028-02-28"
+  },
+  {
+    "id": 12,
+    "name": "On Completion of Internal Plastering",
+    "percent": 5,
+    "expectedDate": "2028-04-30"
+  },
+  {
+    "id": 13,
+    "name": "On Completion of Internal Flooring",
+    "percent": 10,
+    "expectedDate": "2028-06-30"
+  },
+  {
+    "id": 14,
+    "name": "On Completion of Doors and Windows",
+    "percent": 10,
+    "expectedDate": "2028-08-31"
+  },
+  {
+    "id": 15,
+    "name": "On Handover - 5% on Basic Sale Value & Other Charges",
+    "percent": 5,
+    "expectedDate": "2028-10-31"
+  }
+]

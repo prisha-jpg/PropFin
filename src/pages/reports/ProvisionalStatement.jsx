@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { format } from "date-fns";
-import { Download, Landmark, FileText, Calendar, ArrowRight, ShieldCheck } from "lucide-react";
+import { Download, FileText, Calendar, ArrowRight, ShieldCheck } from "lucide-react";
 import { jsPDF } from "jspdf";
 
 export default function ProvisionalStatement() {

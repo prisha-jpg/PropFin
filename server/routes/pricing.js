@@ -6,6 +6,7 @@ import { calculateUnitPricing } from "../../src/lib/unitPricing.js";
 import { postDelayedInterestToLedger, syncHistoricalInterest } from "../utils/interestCalculator.js";
 import { calculateCustomerLedgerBalance } from "../utils/ledgerBalance.js";
 import { getLedgerSummary, getLedgerSummarySync } from "../utils/ledgerFinancialService.js";
+import { calculateFPVAndInterest, calculateFpvWithFifoAllocation, calculateWorkbookFpvEngine } from "../utils/fpvCalculator.js";
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -639,6 +640,389 @@ router.post("/ledger/interest/run-cron", async (req, res) => {
     });
   } catch (error) {
     console.error("Error running interest run:", error);
+    res.status(500).json({ detail: error.message });
+  }
+});
+
+// POST /pricing/calculate-fpv
+router.post("/calculate-fpv", async (req, res) => {
+  try {
+    const result = await buildFpvComputationResponse(req.body);
+    res.json(result);
+  } catch (error) {
+    console.error("Error calculating FPV:", error);
+    res.status(400).json({ detail: error.message });
+  }
+});
+
+const PRESALES_SCHEDULE_FILE = path.join(process.cwd(), "server", "presales_payment_schedule.json");
+
+const formatDateValue = (value) => {
+  if (!value) return "";
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().split("T")[0];
+};
+
+const defaultPresalesSchedule = [
+  { id: 1, name: "Booking Amount", percent: 10, expectedDate: "" },
+  { id: 2, name: "Payable within 15 Days from Agreement Date", percent: 10, expectedDate: "" },
+  { id: 3, name: "On Completion of Foundation Works", percent: 10, expectedDate: "2026-10-30" },
+  { id: 4, name: "On Completion of Parking Level 2 Roof slab", percent: 5, expectedDate: "2026-12-30" },
+  { id: 5, name: "On Completion of Parking Level 5 Roof slab", percent: 5, expectedDate: "2027-02-28" },
+  { id: 6, name: "On Completion of Third Floor Roof slab", percent: 5, expectedDate: "2027-04-30" },
+  { id: 7, name: "On Completion of Seventh Floor Roof slab", percent: 5, expectedDate: "2027-06-30" },
+  { id: 8, name: "On Completion of Eleventh Floor Roof slab", percent: 5, expectedDate: "2027-08-31" },
+  { id: 9, name: "On Completion of Fifteenth Floor Roof slab", percent: 5, expectedDate: "2027-10-31" },
+  { id: 10, name: "On Completion of Terrace slab", percent: 5, expectedDate: "2027-12-31" },
+  { id: 11, name: "On Completion of Internal Block Work", percent: 5, expectedDate: "2028-02-28" },
+  { id: 12, name: "On Completion of Internal Plastering", percent: 5, expectedDate: "2028-04-30" },
+  { id: 13, name: "On Completion of Internal Flooring", percent: 10, expectedDate: "2028-06-30" },
+  { id: 14, name: "On Completion of Doors and Windows", percent: 10, expectedDate: "2028-08-31" },
+  { id: 15, name: "On Handover - 5% on Basic Sale Value & Other Charges", percent: 5, expectedDate: "2028-10-31" },
+];
+
+const ensurePresalesScheduleFile = async () => {
+  try {
+    await fs.access(PRESALES_SCHEDULE_FILE);
+  } catch {
+    await fs.writeFile(PRESALES_SCHEDULE_FILE, JSON.stringify(defaultPresalesSchedule, null, 2), "utf-8");
+  }
+};
+
+const readPresalesSchedule = async () => {
+  await ensurePresalesScheduleFile();
+  const data = await fs.readFile(PRESALES_SCHEDULE_FILE, "utf-8");
+  const parsed = JSON.parse(data);
+  return Array.isArray(parsed) ? parsed : defaultPresalesSchedule;
+};
+
+// GET /pricing/presales-schedule
+router.get("/presales-schedule", async (_req, res) => {
+  try {
+    const schedule = await readPresalesSchedule();
+    res.json(schedule);
+  } catch (error) {
+    console.error("Error loading presales schedule:", error);
+    res.status(500).json({ detail: error.message });
+  }
+});
+
+// POST /pricing/presales-schedule
+router.post("/presales-schedule", async (req, res) => {
+  try {
+    const { schedule } = req.body;
+    if (!Array.isArray(schedule)) {
+      return res.status(400).json({ error: "Schedule must be an array" });
+    }
+    await ensurePresalesScheduleFile();
+    await fs.writeFile(PRESALES_SCHEDULE_FILE, JSON.stringify(schedule, null, 2), "utf-8");
+    res.json({ success: true, message: "Presales schedule updated successfully" });
+  } catch (error) {
+    console.error("Error saving presales schedule:", error);
+    res.status(500).json({ detail: error.message });
+  }
+});
+
+const buildCustomerSchedulePayload = async (salesOrderId) => {
+  const salesOrder = await prisma.sales_orders.findUnique({
+    where: { id: salesOrderId },
+    select: {
+      id: true,
+      customer_id: true,
+      booking_date: true,
+      agreement_date: true,
+      agreement_value: true,
+      total_value: true,
+      basic_sale_value: true,
+      order_number: true,
+    }
+  });
+
+  if (!salesOrder) {
+    throw new Error("Sales order not found");
+  }
+
+  const paymentSchedules = await prisma.payment_schedules.findMany({
+    where: { sales_order_id: salesOrderId },
+    orderBy: { display_order: "asc" },
+    select: {
+      id: true,
+      milestone_name: true,
+      percentage_of_total: true,
+      due_amount: true,
+      original_due_date: true,
+      revised_due_date: true,
+      display_order: true,
+      status: true,
+    }
+  });
+
+  const presalesSchedule = await readPresalesSchedule();
+  const baseValue = Number(salesOrder.basic_sale_value ?? salesOrder.total_value ?? salesOrder.agreement_value ?? 0);
+
+  const dueSchedule = await Promise.all(paymentSchedules.map(async (schedule, index) => {
+    const demandRecord = await prisma.demand_letters.findFirst({
+      where: { sales_order_id: salesOrderId, payment_schedule_id: schedule.id },
+      orderBy: { demand_date: "asc" },
+      select: { demand_date: true, due_date: true }
+    });
+
+    const billedDate = demandRecord?.demand_date || demandRecord?.due_date || null;
+    const fallbackDate = schedule.revised_due_date || schedule.original_due_date || null;
+    const presalesDate = presalesSchedule[index]?.expectedDate || presalesSchedule[index]?.expected_date || null;
+    const resolvedDueDate = billedDate || fallbackDate || presalesDate || null;
+
+    const dueAmount = schedule.due_amount != null
+      ? Number(schedule.due_amount)
+      : (baseValue > 0 && schedule.percentage_of_total != null
+        ? baseValue * Number(schedule.percentage_of_total)
+        : 0);
+
+    const allocationPercent = schedule.percentage_of_total != null ? Number(schedule.percentage_of_total) * 100 : null;
+    const source = index < 2 ? "Customer" : "Presales";
+
+    return {
+      id: schedule.id,
+      description: schedule.milestone_name,
+      name: schedule.milestone_name,
+      allocation_percent: allocationPercent,
+      percent: allocationPercent,
+      due_date: resolvedDueDate ? formatDateValue(resolvedDueDate) : "",
+      due_amount: dueAmount,
+      amount: dueAmount,
+      rowAmount: dueAmount,
+      sequence: schedule.display_order,
+      milestone_type: index < 2 ? "Customer" : "Presales",
+      billing_status: schedule.status,
+      source,
+    };
+  }));
+
+  const existingReceipts = await prisma.customer_receipts.findMany({
+    where: {
+      sales_order_id: salesOrderId,
+      status: { in: ["received", "cleared"] }
+    },
+    orderBy: { receipt_date: "asc" },
+    select: {
+      id: true,
+      receipt_number: true,
+      receipt_date: true,
+      amount: true,
+    }
+  });
+
+  return {
+    sales_order: salesOrder,
+    booking_date: salesOrder.booking_date ? formatDateValue(salesOrder.booking_date) : "",
+    due_schedule: dueSchedule,
+    existing_receipts: existingReceipts.map((receipt) => ({
+      id: receipt.id,
+      description: receipt.receipt_number,
+      date: formatDateValue(receipt.receipt_date),
+      amount: Number(receipt.amount || 0),
+      source: "ledger",
+    })),
+    base_value: baseValue,
+  };
+};
+
+const buildFpvComputationResponse = async (body) => {
+  const { sales_order_id, due_schedule = [], payments = [], due_details = [], payment_details = [] } = body;
+  const scheduleRows = Array.isArray(due_schedule) && due_schedule.length ? due_schedule : (Array.isArray(due_details) ? due_details : []);
+  const paymentRows = Array.isArray(payments) && payments.length ? payments : (Array.isArray(payment_details) ? payment_details : []);
+
+  let agreementValue = Number(body.agreement_value ?? body.basic_sale_value ?? body.base_value ?? 0);
+  if (!agreementValue && sales_order_id) {
+    const salesOrder = await prisma.sales_orders.findUnique({
+      where: { id: sales_order_id },
+      select: { agreement_value: true, total_value: true, basic_sale_value: true }
+    });
+    agreementValue = Number(salesOrder?.basic_sale_value ?? salesOrder?.agreement_value ?? salesOrder?.total_value ?? 0);
+  }
+
+  const result = calculateWorkbookFpvEngine({
+    agreementValue,
+    bookingDate: body.booking_date || body.bookingDate,
+    computationDate: body.computation_date || body.computationDate,
+    discountRate: Number(body.discount_rate ?? body.discountRate ?? body.discount ?? body.interest_rate ?? body.interest_rate_pa ?? body.interestRate ?? 0),
+    interestRate: Number(body.interest_rate ?? body.interest_rate_pa ?? body.interestRate ?? 0),
+    milestones: scheduleRows.map((row, index) => ({
+      id: row.id,
+      description: row.description || row.name || row.milestone_name,
+      allocation_percent: row.allocation_percent ?? row.percent,
+      due_date: row.due_date || row.dueDate || row.target_date || row.original_due_date || row.revised_due_date || null,
+      due_amount: row.due_amount ?? row.rowAmount ?? row.amount ?? row.value,
+      source: row.source,
+      sequence: row.sequence ?? index + 1,
+      milestone_type: row.milestone_type,
+      billing_status: row.billing_status,
+    })),
+    payments: paymentRows.map((row, index) => ({
+      id: row.id || `payment-${index + 1}`,
+      reference: row.reference || row.description || row.receipt_number,
+      payment_date: row.payment_date || row.paymentDate || row.date,
+      amount: row.amount,
+      source: row.source,
+    })),
+    reconciliation: {
+      expectedAgreementValue: Number(body.expected_agreement_value ?? body.expectedAgreementValue ?? agreementValue),
+      expectedTotalReceipts: Number(body.expected_total_receipts ?? body.expectedTotalReceipts ?? 0) || null,
+      expectedOutstanding: Number(body.expected_outstanding ?? body.expectedOutstanding ?? 0) || null,
+      expectedDueScheduleAmount: Number(body.expected_due_schedule_amount ?? body.expectedDueScheduleAmount ?? 0) || null,
+    },
+  });
+
+  return {
+    agreement: result.agreement,
+    milestones: result.milestones,
+    allocations: result.allocations,
+    totals: result.totals,
+    summary: {
+      ...result.summary,
+      total_milestones: scheduleRows.length,
+      total_allocation: scheduleRows.reduce((sum, row) => sum + Number(row.allocation_percent ?? row.percent ?? 0), 0),
+    },
+    warnings: result.warnings,
+  };
+};
+
+router.get("/customer-schedule/:lienId", async (req, res) => {
+  try {
+    const payload = await buildCustomerSchedulePayload(req.params.lienId);
+    res.json(payload);
+  } catch (error) {
+    console.error("Error loading customer schedule:", error);
+    res.status(500).json({ detail: error.message });
+  }
+});
+
+router.get("/fpv-workflow/:salesOrderId", async (req, res) => {
+  try {
+    const { salesOrderId } = req.params;
+    const payload = await buildCustomerSchedulePayload(salesOrderId);
+
+    const savedFpv = await prisma.fpv_calculations.findFirst({
+      where: { sales_order_id: salesOrderId },
+      select: {
+        id: true,
+        calculation_date: true,
+        interest_rate: true,
+        total_agreement_value: true,
+        discount_on_upfront: true,
+        interest_on_late_payment: true,
+        net_fpv: true,
+        schedule_details: true,
+        payment_details: true,
+      }
+    });
+
+    res.json({
+      ...payload,
+      due_details: payload.due_schedule,
+      saved_fpv: savedFpv,
+      summary: savedFpv ? {
+        total_due_amount: savedFpv.total_agreement_value,
+        total_paid_amount: 0,
+        total_discount: savedFpv.discount_on_upfront,
+        total_late_interest: savedFpv.interest_on_late_payment,
+        outstanding_amount: savedFpv.net_fpv,
+        net_adjustment: savedFpv.net_fpv,
+      } : null,
+    });
+  } catch (error) {
+    console.error("Error loading FPV workflow:", error);
+    res.status(500).json({ detail: error.message });
+  }
+});
+
+router.post("/fpv-workflow/compute", async (req, res) => {
+  try {
+    const result = await buildFpvComputationResponse(req.body);
+    res.json(result);
+  } catch (error) {
+    console.error("Error computing FPV workflow:", error);
+    res.status(400).json({ detail: error.message });
+  }
+});
+
+// GET /pricing/fpv-calculation/:salesOrderId
+router.get("/fpv-calculation/:salesOrderId", async (req, res) => {
+  try {
+    const { salesOrderId } = req.params;
+    const record = await prisma.fpv_calculations.findFirst({
+      where: { sales_order_id: salesOrderId }
+    });
+    res.json(record);
+  } catch (error) {
+    console.error("Error fetching FPV calculation:", error);
+    res.status(500).json({ detail: error.message });
+  }
+});
+
+// POST /pricing/fpv-calculation
+router.post("/fpv-calculation", async (req, res) => {
+  try {
+    const {
+      sales_order_id,
+      customer_id,
+      calculation_date,
+      interest_rate,
+      total_agreement_value,
+      discount_on_upfront,
+      interest_on_late_payment,
+      net_fpv,
+      schedule_details,
+      payment_details
+    } = req.body;
+
+    if (!sales_order_id || !customer_id) {
+      return res.status(400).json({ error: "Missing sales_order_id or customer_id" });
+    }
+
+    const existing = await prisma.fpv_calculations.findFirst({
+      where: { sales_order_id }
+    });
+
+    let record;
+    if (existing) {
+      record = await prisma.fpv_calculations.update({
+        where: { id: existing.id },
+        data: {
+          calculation_date: calculation_date ? new Date(calculation_date) : new Date(),
+          interest_rate: interest_rate,
+          total_agreement_value: total_agreement_value,
+          discount_on_upfront: discount_on_upfront,
+          interest_on_late_payment: interest_on_late_payment,
+          net_fpv: net_fpv,
+          schedule_details: schedule_details,
+          payment_details: payment_details,
+          updated_at: new Date()
+        }
+      });
+    } else {
+      const calculation_number = `FPV-${Math.floor(100000 + Math.random() * 900000)}`;
+      record = await prisma.fpv_calculations.create({
+        data: {
+          calculation_number,
+          sales_order_id,
+          customer_id,
+          calculation_date: calculation_date ? new Date(calculation_date) : new Date(),
+          interest_rate: interest_rate,
+          total_agreement_value: total_agreement_value,
+          discount_on_upfront: discount_on_upfront,
+          interest_on_late_payment: interest_on_late_payment,
+          net_fpv: net_fpv,
+          schedule_details: schedule_details,
+          payment_details: payment_details,
+        }
+      });
+    }
+
+    res.json(record);
+  } catch (error) {
+    console.error("Error saving FPV calculation:", error);
     res.status(500).json({ detail: error.message });
   }
 });

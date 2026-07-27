@@ -72,24 +72,6 @@ const mapUnitsToMasterList = (units) =>
     };
   });
 
-const initialPaymentSchedule = [
-  { id: 1, name: "Booking Amount", percent: 10 },
-  { id: 2, name: "Payable within 15 Days from Agreement Date", percent: 10 },
-  { id: 3, name: "On Completion of Foundation Works", percent: 10 },
-  { id: 4, name: "On Completion of Parking Level 2 Roof slab", percent: 5 },
-  { id: 5, name: "On Completion of Parking Level 5 Roof slab", percent: 5 },
-  { id: 6, name: "On Completion of Third Floor Roof slab", percent: 5 },
-  { id: 7, name: "On Completion of Seventh Floor Roof slab", percent: 5 },
-  { id: 8, name: "On Completion of Eleventh Floor Roof slab", percent: 5 },
-  { id: 9, name: "On Completion of Fifteenth Floor Roof slab", percent: 5 },
-  { id: 10, name: "On Completion of Terrace slab", percent: 5 },
-  { id: 11, name: "On Completion of Internal Block Work", percent: 5 },
-  { id: 12, name: "On Completion of Internal Plastering", percent: 5 },
-  { id: 13, name: "On Completion of Internal Flooring", percent: 10 },
-  { id: 14, name: "On Completion of Doors and Windows", percent: 10 },
-  { id: 15, name: "On Handover - 5% on Basic Sale Value & Other Charges", percent: 5 },
-];
-
 export default function PresalesHub() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -105,14 +87,25 @@ export default function PresalesHub() {
     queryFn: () => apiClient.entities.Project.list(),
   });
 
+  const { data: presalesScheduleData } = useQuery({
+    queryKey: ["presales-schedule"],
+    queryFn: () => apiClient.get("/pricing/presales-schedule"),
+  });
+
   const [masterList, setMasterList] = useState([]);
-  const [paymentSchedule, setPaymentSchedule] = useState(initialPaymentSchedule);
+  const [paymentSchedule, setPaymentSchedule] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState("all");
   const [projectDefaults, setProjectDefaults] = useState({
     default_caic_charges: 1500000,
     default_maintenance_deposit: 300000,
     default_gst_rate: 5,
   });
+
+  useEffect(() => {
+    if (Array.isArray(presalesScheduleData)) {
+      setPaymentSchedule(presalesScheduleData);
+    }
+  }, [presalesScheduleData]);
 
   useEffect(() => {
     if (masterUnits) {
@@ -169,6 +162,21 @@ export default function PresalesHub() {
     },
   });
 
+  const savePresalesScheduleMutation = useMutation({
+    mutationFn: (schedule) => apiClient.post("/pricing/presales-schedule", { schedule }),
+    onSuccess: () => {
+      toast({ title: "Saved!", description: "Payment schedule configuration saved to backend." });
+      queryClient.invalidateQueries({ queryKey: ["presales-schedule"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Save Failed",
+        description: err.message || "Could not save payment schedule.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleSaveConfiguration = () => {
     if (activeTab === "master-pl") {
       const payload = masterList
@@ -192,6 +200,14 @@ export default function PresalesHub() {
           };
         });
       saveMasterMutation.mutate(payload);
+    } else if (activeTab === "payment-schedule") {
+      const payload = paymentSchedule.map((row) => ({
+        id: row.id,
+        name: row.name,
+        percent: Number(row.percent) || 0,
+        expectedDate: row.expectedDate ? row.expectedDate : null,
+      }));
+      savePresalesScheduleMutation.mutate(payload);
     } else {
       toast({ title: "Saved!", description: "Configuration saved locally." });
     }
@@ -291,7 +307,7 @@ export default function PresalesHub() {
 
   const addScheduleRow = () => {
     const newId = paymentSchedule.length ? Math.max(...paymentSchedule.map(r => r.id)) + 1 : 1;
-    setPaymentSchedule([...paymentSchedule, { id: newId, name: "New Milestone", percent: 0 }]);
+    setPaymentSchedule([...paymentSchedule, { id: newId, name: "New Milestone", percent: 0, expectedDate: "" }]);
   };
 
   const deleteScheduleRow = (id) => {
@@ -449,29 +465,29 @@ export default function PresalesHub() {
                 </div>
               </div>
             </CardContent>
-            <CardContent className="p-0 overflow-x-auto">
-              <Table>
-                <TableHeader className="bg-slate-50">
+            <CardContent className="p-0 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+              <Table className="w-full min-w-[1200px] border-collapse">
+                <TableHeader className="sticky top-0 bg-white shadow-sm z-10 text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-200">
                   <TableRow>
-                    <TableHead className="w-[120px]">Unit No.</TableHead>
-                    <TableHead className="w-[120px]">Type</TableHead>
-                    <TableHead className="w-[120px]">Block</TableHead>
-                    <TableHead className="w-[100px]">Floor</TableHead>
-                    <TableHead className="w-[120px] text-right">SBA (Sq.Ft)</TableHead>
-                    <TableHead className="w-[120px] text-right">Rate (₹)</TableHead>
-                    <TableHead className="w-[140px] text-right">CAIC Charges</TableHead>
-                    <TableHead className="text-right text-slate-500">Base Sale Value</TableHead>
-                    <TableHead className="w-[100px] text-right">GST (%)</TableHead>
-                    <TableHead className="text-right text-slate-500">GST Charges</TableHead>
-                    <TableHead className="w-[150px] text-right">Maint. Deposit</TableHead>
-                    <TableHead className="text-right text-blue-600">Total Value</TableHead>
-                    <TableHead className="w-[50px]"></TableHead>
+                    <TableHead className="px-4 py-3 text-left w-[120px]">Unit No.</TableHead>
+                    <TableHead className="px-4 py-3 text-left w-[120px]">Type</TableHead>
+                    <TableHead className="px-4 py-3 text-left w-[120px]">Block</TableHead>
+                    <TableHead className="px-4 py-3 text-left w-[100px]">Floor</TableHead>
+                    <TableHead className="px-4 py-3 text-right w-[140px]">SBA (Sq.Ft)</TableHead>
+                    <TableHead className="px-4 py-3 text-right w-[140px]">Rate (₹)</TableHead>
+                    <TableHead className="px-4 py-3 text-right w-[160px]">CAIC Charges</TableHead>
+                    <TableHead className="px-4 py-3 text-right text-slate-500">Base Sale Value</TableHead>
+                    <TableHead className="px-4 py-3 text-right w-[110px]">GST (%)</TableHead>
+                    <TableHead className="px-4 py-3 text-right text-slate-500">GST Charges</TableHead>
+                    <TableHead className="px-4 py-3 text-right w-[160px]">Maint. Deposit</TableHead>
+                    <TableHead className="px-4 py-3 text-right text-blue-600">Total Value</TableHead>
+                    <TableHead className="px-4 py-3 w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoadingMaster ? (
                     <TableRow>
-                      <TableCell colSpan={13} className="h-24 text-center">
+                      <TableCell colSpan={13} className="h-24 text-center px-4 py-3">
                         <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary" />
                       </TableCell>
                     </TableRow>
@@ -482,63 +498,91 @@ export default function PresalesHub() {
                     const maintenance = Number(row.maintenance) || 300000;
                     const total = bsv > 0 ? bsv + gst + maintenance : 0;
                     return (
-                      <TableRow key={row.unit_id} className="hover:bg-slate-50/50 group">
-                        <TableCell className="font-medium">{row.unit}</TableCell>
-                        <TableCell>
-                          <Input value={row.type} onChange={(e) => updateMasterList(row.unit_id, "type", e.target.value)} className="h-8 border-transparent hover:border-slate-200 focus:border-blue-500" />
+                      <TableRow key={row.unit_id} className="border-b border-slate-200 even:bg-slate-50/50 hover:bg-blue-50 transition-colors group">
+                        <TableCell className="px-4 py-3 text-left font-semibold text-slate-800">{row.unit}</TableCell>
+                        <TableCell className="px-4 py-3 text-left">
+                          <Input
+                            value={row.type}
+                            onChange={(e) => updateMasterList(row.unit_id, "type", e.target.value)}
+                            className="h-8 w-full px-2 py-1 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                          />
                         </TableCell>
-                        <TableCell>{row.block}</TableCell>
-                        <TableCell>
-                          <Input value={row.floor} onChange={(e) => updateMasterList(row.unit_id, "floor", e.target.value)} className="h-8 border-transparent hover:border-slate-200 focus:border-blue-500" />
+                        <TableCell className="px-4 py-3 text-left text-slate-600">{row.block}</TableCell>
+                        <TableCell className="px-4 py-3 text-left">
+                          <Input
+                            value={row.floor}
+                            onChange={(e) => updateMasterList(row.unit_id, "floor", e.target.value)}
+                            className="h-8 w-full px-2 py-1 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                          />
                         </TableCell>
-                        <TableCell>
-                          <Input type="number" step="0.01" value={row.sba} onChange={(e) => updateMasterList(row.unit_id, "sba", e.target.value)} className="h-8 text-right font-medium border-transparent hover:border-slate-200 focus:border-blue-500" />
+                        <TableCell className="px-4 py-3 text-right">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={row.sba}
+                            onChange={(e) => updateMasterList(row.unit_id, "sba", e.target.value)}
+                            className="h-8 min-w-[80px] w-full px-2 py-1 text-sm text-right border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white font-medium"
+                          />
                         </TableCell>
-                        <TableCell>
-                          <Input type="number" value={row.rate} onChange={(e) => updateMasterList(row.unit_id, "rate", e.target.value)} className="h-8 text-right border-transparent hover:border-slate-200 focus:border-blue-500" />
+                        <TableCell className="px-4 py-3 text-right">
+                          <Input
+                            type="number"
+                            value={row.rate}
+                            onChange={(e) => updateMasterList(row.unit_id, "rate", e.target.value)}
+                            className="h-8 min-w-[80px] w-full px-2 py-1 text-sm text-right border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                          />
                         </TableCell>
-                        <TableCell>
-                          <div className="flex justify-end">
-                            <Input
-                              type="number"
-                              value={row.caic ?? ""}
-                              onChange={(e) => updateMasterList(row.unit_id, "caic", e.target.value)}
-                              className="h-8 w-[130px] text-right border-transparent hover:border-slate-200 focus:border-blue-500"
-                            />
-                          </div>
+                        <TableCell className="px-4 py-3 text-right">
+                          <Input
+                            type="number"
+                            value={row.caic ?? ""}
+                            onChange={(e) => updateMasterList(row.unit_id, "caic", e.target.value)}
+                            className="h-8 min-w-[110px] w-full px-2 py-1 text-sm text-right border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                          />
                         </TableCell>
-                        <TableCell className="text-right text-slate-500 align-middle pr-4">₹{bsv.toLocaleString("en-IN")}</TableCell>
-                        <TableCell>
-                          <div className="flex justify-end">
-                            <Input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={row.gst_rate ?? 5}
-                              onChange={(e) => updateMasterList(row.unit_id, "gst_rate", e.target.value)}
-                              className="h-8 w-[72px] text-right border-transparent hover:border-slate-200 focus:border-blue-500"
-                            />
-                          </div>
+                        <TableCell className="px-4 py-3 text-right text-slate-700 font-medium align-middle">
+                          ₹{bsv.toLocaleString("en-IN")}
                         </TableCell>
-                        <TableCell className="text-right text-slate-500 align-middle pr-4">₹{gst.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</TableCell>
-                        <TableCell>
-                          <div className="flex justify-end">
-                            <Input
-                              type="number"
-                              value={row.maintenance ?? 300000}
-                              onChange={(e) => updateMasterList(row.unit_id, "maintenance", e.target.value)}
-                              className="h-8 w-[120px] text-right border-transparent hover:border-slate-200 focus:border-blue-500"
-                            />
-                          </div>
+                        <TableCell className="px-4 py-3 text-right">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={row.gst_rate ?? 5}
+                            onChange={(e) => updateMasterList(row.unit_id, "gst_rate", e.target.value)}
+                            className="h-8 min-w-[70px] w-full px-2 py-1 text-sm text-right border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                          />
                         </TableCell>
-                        <TableCell className="text-right font-bold text-slate-800 align-middle pr-4">₹{total.toLocaleString("en-IN")}</TableCell>
-                        <TableCell></TableCell>
+                        <TableCell className="px-4 py-3 text-right text-slate-500 align-middle">
+                          ₹{gst.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                        </TableCell>
+                        <TableCell className="px-4 py-3 text-right">
+                          <Input
+                            type="number"
+                            value={row.maintenance ?? 300000}
+                            onChange={(e) => updateMasterList(row.unit_id, "maintenance", e.target.value)}
+                            className="h-8 min-w-[110px] w-full px-2 py-1 text-sm text-right border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                          />
+                        </TableCell>
+                        <TableCell className="px-4 py-3 text-right font-bold text-slate-800 align-middle">
+                          ₹{total.toLocaleString("en-IN")}
+                        </TableCell>
+                        <TableCell className="px-4 py-3 text-center">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => deleteMasterRow(row.unit_id)}
+                            className="h-8 w-8 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     );
                   })}
                   {!isLoadingMaster && filteredMasterList.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={13} className="h-24 text-center text-slate-500">
+                      <TableCell colSpan={13} className="h-24 text-center px-4 py-3 text-slate-500">
                         No units found. Add units to inventory and configure pricing.
                       </TableCell>
                     </TableRow>
@@ -686,6 +730,7 @@ export default function PresalesHub() {
                   <TableRow>
                     <TableHead className="w-[80px]">Step</TableHead>
                     <TableHead>Milestone Description</TableHead>
+                    <TableHead className="w-[180px]">Target Date</TableHead>
                     <TableHead className="text-right w-[150px]">Allocation (%)</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
@@ -700,6 +745,24 @@ export default function PresalesHub() {
                           onChange={(e) => updateSchedule(row.id, 'name', e.target.value)}
                           className="h-9 border-transparent bg-transparent hover:border-slate-200 focus:border-amber-500 focus:bg-white"
                         />
+                      </TableCell>
+                      <TableCell className="w-[180px]">
+                        {index === 0 || index === 1 ? (
+                          <Input
+                            type="text"
+                            value=""
+                            placeholder="Dynamic (Customer Specific)"
+                            disabled
+                            className="h-9 bg-slate-50 border-dashed text-slate-400 placeholder:text-slate-400 cursor-not-allowed select-none"
+                          />
+                        ) : (
+                          <Input
+                            type="date"
+                            value={row.expectedDate || ""}
+                            onChange={(e) => updateSchedule(row.id, 'expectedDate', e.target.value)}
+                            className="h-9 border-transparent bg-transparent hover:border-slate-200 focus:border-amber-500 focus:bg-white"
+                          />
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="relative">
@@ -722,7 +785,7 @@ export default function PresalesHub() {
                   
                   {/* Dynamic Validation Row */}
                   <TableRow className={isScheduleValid ? "bg-emerald-50/50" : "bg-red-50/50"}>
-                    <TableCell colSpan={2} className="text-right font-bold text-slate-700 py-6">
+                    <TableCell colSpan={3} className="text-right font-bold text-slate-700 py-6">
                       <div className="flex items-center justify-end gap-2">
                         {!isScheduleValid && <AlertCircle className="w-4 h-4 text-red-500" />}
                         TOTAL ALLOCATION

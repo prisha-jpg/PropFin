@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { calculateDynamicFPV } from "../../src/utils/fpv";
+import { calculateDynamicFPV, hydrateCustomerSchedule } from "../../src/utils/fpv";
 
 console.log("Starting Dynamic FPV Calculator Unit Tests...\n");
 
@@ -171,6 +171,29 @@ runTest("Input validation & Date object inputs", () => {
   // Days difference:
   // Date.UTC(2025, 9, 10) - Date.UTC(2025, 8, 10) = 30 days.
   assert.strictEqual(row.days, 30);
+});
+
+// Test Case 6: hydrateCustomerSchedule verification
+runTest("hydrateCustomerSchedule verification", () => {
+  const master = [
+    { name: "Booking Amount", percent: 10, expectedDate: "" },
+    { name: "Payable within 15 Days from Agreement Date", percent: 10, expectedDate: "" },
+    { name: "On Completion of Foundation Works", percent: 10, expectedDate: "2026-10-30" },
+  ];
+
+  const bookingDate = "2026-07-15";
+  const agreementDate = "2026-07-20";
+
+  const hydrated = hydrateCustomerSchedule(master, bookingDate, agreementDate);
+
+  // Row 1: Booking Amount -> Booking date (2026-07-15)
+  assert.strictEqual(hydrated[0].dueDate, "2026-07-15");
+
+  // Row 2: Payable within 15 Days from Agreement Date -> Agreement date (2026-07-20) + 15 days = 2026-08-04
+  assert.strictEqual(hydrated[1].dueDate, "2026-08-04");
+
+  // Row 3: Foundation -> Keeps static target date "2026-10-30"
+  assert.strictEqual(hydrated[2].dueDate, "2026-10-30");
 });
 
 console.log("\nAll FPV tests passed successfully!");

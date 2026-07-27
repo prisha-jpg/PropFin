@@ -6,89 +6,38 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Calculator, Wand2 } from "lucide-react";
+import { Calculator, Save } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/components/ui/use-toast";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-// ---------------------------------------------------------------------------
-// Pure utility helpers (no React dependencies)
-// ---------------------------------------------------------------------------
-
-const BILLED_STATUSES = new Set(["raised", "paid", "partially_paid"]);
-
-/**
- * Normalise DB percentage_of_total: fractions ≤ 1 are multiplied by 100.
- * e.g.  0.1  → 10     |   10  → 10
- */
 const normalisePercent = (raw) => {
   const n = Number(raw ?? 0);
   return n > 0 && n <= 1 ? n * 100 : n;
 };
 
-/**
- * Safe calendar-day difference: dueDate − computationDate.
- *
- * Both inputs are YYYY-MM-DD strings. We parse them as explicit midnight UTC
- * (via the "T00:00:00Z" suffix) so that no local timezone or DST shift can
- * cause an off-by-one error.
- *
- * Returns a non-negative integer. If the due date is in the past relative to
- * the computation date, returns 0 (per the Excel edge-case rule).
- */
-const calcDaysDiff = (computationDateStr, dueDateStr) => {
-  if (!computationDateStr || !dueDateStr) return 0;
-  const comp = Date.parse(`${computationDateStr}T00:00:00Z`);
-  const due  = Date.parse(`${dueDateStr}T00:00:00Z`);
-  if (isNaN(comp) || isNaN(due)) return 0;
-  const diff = Math.floor((due - comp) / (1000 * 60 * 60 * 24));
-  return Math.max(0, diff);
-};
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("en-IN", {
+    maximumFractionDigits: 0,
+  }).format(Number(value ?? 0));
 
-const formatDueDateValue = (rawDate) => {
-  if (!rawDate) return "";
-  const parsedDate = rawDate instanceof Date ? rawDate : new Date(rawDate);
-  if (Number.isNaN(parsedDate.getTime())) return "";
-  const year = parsedDate.getFullYear();
-  const month = String(parsedDate.getMonth() + 1).padStart(2, "0");
-  const day = String(parsedDate.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+const getErrorMessage = (error) => {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  return "Request failed";
 };
-
-/**
- * Maps payment_schedules rows into Due Details form rows.
- * All three values (agreementValue, computationDate) are passed as plain
- * arguments — never read from React state — so they are guaranteed current.
- */
-const buildDueRows = (paymentSchedules = [], agreementValue = 0, computationDate = "") =>
-  paymentSchedules.map((ps, i) => {
-    const pct = normalisePercent(ps.percentage_of_total);
-    const rawDate = ps.revised_due_date
-      ?? ps.original_due_date
-      ?? ps.due_date
-      ?? ps.expected_date
-      ?? ps.dueDate
-      ?? ps.expectedDate
-      ?? ps.originalDueDate
-      ?? ps.revisedDueDate
-      ?? ps.schedule_date
-      ?? ps.installment_date
-      ?? "";
-    const dueDate = formatDueDateValue(rawDate);
-    const rowAmount = Math.round((agreementValue * pct) / 100) || 0;
-    const days = calcDaysDiff(computationDate, dueDate);
-    return {
-      id: `due-ps-${ps.id || i}-${Date.now()}`,
-      name: ps.milestone_name || ps.name || "",
-      percent: String(pct),
-      dueDate,
-      rowAmount,
-      days,
-      _status: ps.status || "pending",
-      _isBilled: BILLED_STATUSES.has((ps.status || "").toLowerCase()),
-    };
-  });
 
 export default function FPVCalculation() {
+  const { toast } = useToast();
+
   const [form, setForm] = useState({
     lienName: "",
     salesOrderId: "",
@@ -100,232 +49,246 @@ export default function FPVCalculation() {
     discountType: "payment_before_due",
   });
 
+  const [selectedLienId, setSelectedLienId] = useState("");
+  const [error, setError] = useState("");
+  const [calculationSummary, setCalculationSummary] = useState(null);
+  const [dueSchedule, setDueSchedule] = useState([]);
+  const [payments, setPayments] = useState([{ id: "pay-1", description: "", date: "", amount: "", source: "manual" }]);
+  const [isLoading, setIsLoading] = useState(false);
+
   const { data: salesOrders = [] } = useQuery({
     queryKey: ["salesOrders"],
     queryFn: () => apiClient.entities.SalesOrder.list("-created_date", 500),
   });
 
-  const [error, setError] = useState("");
-  const [result, setResult] = useState(null);
-  const [schedules, setSchedules] = useState([
-    { id: "due-1", name: "", percent: "", dueDate: "", rowAmount: 0, days: 0, _status: "pending", _isBilled: false },
-  ]);
-  const [payments, setPayments] = useState([
-    { id: "pay-1", reference: "", paymentDate: "", amount: "" },
-  ]);
+  const { data: savedFpvData, refetch: refetchSavedFpv } = useQuery({
+    queryKey: ["saved-fpv", selectedLienId],
+    queryFn: () => apiClient.get(`/pricing/fpv-calculation/${selectedLienId}`),
+    enabled: !!selectedLienId,
+  });
 
-  // ---------------------------------------------------------------------------
-  // Schedule population
-  // ---------------------------------------------------------------------------
-
-  // All three values are passed explicitly — never read from React state —
-  // so the math is guaranteed correct even on the very first render.
-  const populateDueDetails = (order, agreementValue, computationDate) => {
-    const scheduleRows = order?.payment_schedules ?? [];
-    if (scheduleRows.length === 0) {
-      setSchedules([{
-        id: `due-blank-${Date.now()}`, name: "", percent: "",
-        dueDate: "", rowAmount: 0, days: 0,
-        _status: "pending", _isBilled: false,
-      }]);
+  useEffect(() => {
+    if (!selectedLienId) {
+      setDueSchedule([]);
+      setPayments([{ id: "pay-1", description: "", date: "", amount: "", source: "manual" }]);
+      setCalculationSummary(null);
+      setError("");
       return;
     }
 
-    if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
-      console.debug("FPV milestone payload", scheduleRows);
+    const loadWorkflow = async () => {
+      setIsLoading(true);
+      try {
+        const workflow = await apiClient.get(`/pricing/customer-schedule/${selectedLienId}`);
+        const order = workflow.sales_order || {};
+        const agreementValue = Number(order.basic_sale_value ?? order.agreement_value ?? order.total_value ?? 0);
+
+        setForm((prev) => ({
+          ...prev,
+          salesOrderId: selectedLienId,
+          bookingDate: workflow.booking_date ? workflow.booking_date.split("T")[0] : prev.bookingDate,
+          lateInterestRate: prev.lateInterestRate || String(workflow.interest_rate ?? ""),
+          agreementValue: agreementValue > 0 ? String(agreementValue) : prev.agreementValue,
+        }));
+
+        const dueDetails = Array.isArray(workflow.due_schedule) ? workflow.due_schedule : [];
+        setDueSchedule(
+          dueDetails.map((row, index) => ({
+            id: row.id || `due-${index + 1}`,
+            name: row.description || row.milestone_name || row.name || "",
+            percent: String(normalisePercent(row.allocation_percent ?? row.percent ?? 0)),
+            dueDate: row.due_date || row.dueDate || "",
+            rowAmount: Number(row.due_amount || row.rowAmount || 0),
+            source: row.source || (index < 2 ? "Customer" : "Presales"),
+          }))
+        );
+
+        const persistedPayments = Array.isArray(workflow.existing_receipts) && workflow.existing_receipts.length
+          ? workflow.existing_receipts
+          : [];
+
+        setPayments(
+          persistedPayments.length
+            ? persistedPayments.map((payment, idx) => ({
+                id: payment.id || `pay-${idx + 1}`,
+                description: payment.description || payment.reference || payment.receipt_number || "",
+                date: payment.date || payment.paymentDate || payment.payment_date || "",
+                amount: String(payment.amount || payment.amountNum || ""),
+                source: payment.source || "ledger",
+              }))
+            : [{ id: "pay-1", description: "", date: "", amount: "", source: "manual" }]
+        );
+
+        if (workflow.summary) {
+          setCalculationSummary({
+            totalDue: Number(workflow.summary.total_due_amount || 0),
+            totalPaid: Number(workflow.summary.total_paid_amount || 0),
+            totalDiscount: Number(workflow.summary.total_discount || 0),
+            totalLateInterest: Number(workflow.summary.total_late_interest || 0),
+            outstanding: Number(workflow.summary.outstanding_amount || 0),
+            netAdjustment: Number(workflow.summary.net_adjustment || 0),
+            allocations: workflow.allocations || [],
+            summary: workflow.summary,
+          });
+        } else {
+          setCalculationSummary(null);
+        }
+        setError("");
+      } catch (err) {
+        setError(getErrorMessage(err));
+        setCalculationSummary(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadWorkflow();
+  }, [selectedLienId]);
+
+  useEffect(() => {
+    if (!selectedLienId || !form.computationDate || !form.agreementValue || !dueSchedule.length) {
+      setCalculationSummary(null);
+      return;
     }
 
-    setSchedules(buildDueRows(scheduleRows, agreementValue, computationDate));
-  };
+    const timer = window.setTimeout(async () => {
+      setIsLoading(true);
+      try {
+        const paymentRows = payments
+          .filter((row) => Number(row.amount || 0) > 0)
+          .map((row) => ({
+            id: row.id,
+            reference: row.description,
+            payment_date: row.date,
+            amount: Number(row.amount || 0),
+          }));
 
-  // ---------------------------------------------------------------------------
-  // Re-calculate `days` for every row when the global Computation Date changes.
-  // This fires AFTER setForm has committed the new date to state, so
-  // form.computationDate is already the fresh value inside the effect.
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    if (!form.computationDate) return;
-    setSchedules((prev) =>
-      prev.map((row) => ({
-        ...row,
-        days: calcDaysDiff(form.computationDate, row.dueDate),
-      }))
-    );
-  }, [form.computationDate]);
+        const response = await apiClient.post("/pricing/calculate-fpv", {
+          sales_order_id: selectedLienId,
+          agreement_value: Number(form.agreementValue || 0),
+          basic_sale_value: Number(form.agreementValue || 0),
+          base_value: Number(form.agreementValue || 0),
+          computation_date: form.computationDate,
+          interest_rate: form.lateInterestRate ? Number(form.lateInterestRate) : 0,
+          discount_type: form.discountType,
+          due_schedule: dueSchedule.map((row, index) => ({
+            id: row.id,
+            description: row.name,
+            allocation_percent: Number(row.percent || 0),
+            due_date: row.dueDate,
+            due_amount: Number(row.rowAmount || 0),
+            source: row.source,
+            sequence: index + 1,
+            milestone_type: index < 2 ? "Customer" : "Presales",
+          })),
+          payments: paymentRows,
+        });
 
-  const setScheduleField = (id, field, value) => {
-    setSchedules((prev) =>
-      prev.map((row) => {
-        if (row.id !== id) return row;
-        const updated = { ...row, [field]: value };
-        // When % changes, recompute the ₹ amount.
-        if (field === "percent") {
-          const pct = Number(value || 0);
-          const av  = Number(form.agreementValue || 0);
-          updated.rowAmount = Math.round((av * pct) / 100) || 0;
-        }
-        // When dueDate changes, recompute days against the global computation date.
-        if (field === "dueDate") {
-          updated.days = calcDaysDiff(form.computationDate, value);
-        }
-        return updated;
-      })
-    );
-  };
+        setCalculationSummary({
+          totalDue: Number(response.totals?.total_due_amount || 0),
+          totalPaid: Number(response.totals?.total_paid_amount || 0),
+          totalDiscount: Number(response.totals?.total_discount || 0),
+          totalLateInterest: Number(response.totals?.total_late_interest || 0),
+          outstanding: Number(response.totals?.outstanding_amount || 0),
+          netAdjustment: Number(response.totals?.net_adjustment || 0),
+          allocations: response.allocations || [],
+          summary: {
+            total_milestones: dueSchedule.length,
+            total_allocation: dueSchedule.reduce((sum, row) => sum + Number(normalisePercent(row.percent || 0)), 0),
+            total_due_amount: Number(response.totals?.total_due_amount || 0),
+            total_paid_amount: Number(response.totals?.total_paid_amount || 0),
+            total_discount: Number(response.totals?.total_discount || 0),
+            total_late_interest: Number(response.totals?.total_late_interest || 0),
+            outstanding_amount: Number(response.totals?.outstanding_amount || 0),
+            net_adjustment: Number(response.totals?.net_adjustment || 0),
+          },
+        });
+        setError("");
+      } catch (err) {
+        setError(getErrorMessage(err));
+        setCalculationSummary(null);
+      } finally {
+        setIsLoading(false);
+      }
+    }, 500);
 
-  const setPaymentField = (id, field, value) => {
+    return () => window.clearTimeout(timer);
+  }, [selectedLienId, form.computationDate, form.lateInterestRate, form.discountType, dueSchedule, payments, form.agreementValue]);
+
+  const handlePaymentChange = (id, field, value) => {
     setPayments((prev) => prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
   };
 
-  const addScheduleRow = () => {
-    setSchedules((prev) => [
-      ...prev,
-      { id: `due-${Date.now()}`, name: "", percent: "", dueDate: "", rowAmount: 0, days: 0, _status: "pending", _isBilled: false },
-    ]);
+  const handleAddPayment = () => {
+    setPayments((prev) => [...prev, { id: `pay-${Date.now()}`, description: "", date: "", amount: "", source: "manual" }]);
   };
 
-  const removeScheduleRow = (id) => {
-    setSchedules((prev) => (prev.length > 1 ? prev.filter((row) => row.id !== id) : prev));
-  };
-
-  const addPaymentRow = () => {
-    setPayments((prev) => [...prev, { id: `pay-${Date.now()}`, reference: "", paymentDate: "", amount: "" }]);
-  };
-
-  const removePaymentRow = (id) => {
+  const handleRemovePayment = (id) => {
     setPayments((prev) => (prev.length > 1 ? prev.filter((row) => row.id !== id) : prev));
   };
 
-  const toDate = (value) => (value ? new Date(`${value}T00:00:00`) : null);
-  const dayDiff = (a, b) => Math.round((a - b) / (1000 * 60 * 60 * 24));
-
-  const calculate = () => {
-    setError("");
-    const agreementValue = Number(form.agreementValue || 0);
-    const discountRate = 0;
-    const lateInterestRate = Number(form.lateInterestRate || 0) / 100;
-    const computationDate = toDate(form.computationDate);
-    const bookingDate = toDate(form.bookingDate);
-
-    if (agreementValue <= 0) {
-      setError("Agreement value must be greater than 0.");
-      setResult(null);
-      return;
-    }
-    if (discountRate < 0 || lateInterestRate < 0) {
-      setError("Rates cannot be negative.");
-      setResult(null);
-      return;
-    }
-
-    const dueRows = schedules
-      .map((row) => ({
-        ...row,
-        dueAmount: (agreementValue * Number(row.percent || 0)) / 100,
-        dueDateObj: toDate(row.dueDate),
-        // Use the pre-computed days from state — already clamped ≥ 0 and
-        // timezone-safe. Fall back to live computation if somehow absent.
-        days: row.days ?? calcDaysDiff(form.computationDate, row.dueDate),
-        remaining: (agreementValue * Number(row.percent || 0)) / 100,
-      }))
-      .filter((row) => row.dueAmount > 0);
-
-    if (!dueRows.length) {
-      setError("Add at least one due schedule with a valid percentage.");
-      setResult(null);
-      return;
-    }
-
-    const paymentRows = payments
-      .map((row) => ({
-        ...row,
-        amountNum: Number(row.amount || 0),
-        paymentDateObj: toDate(row.paymentDate),
-      }))
-      .filter((row) => row.amountNum > 0 && row.paymentDateObj);
-
-    if (!paymentRows.length) {
-      setError("Add at least one payment with date and amount.");
-      setResult(null);
-      return;
-    }
-
-    paymentRows.sort((a, b) => a.paymentDateObj - b.paymentDateObj);
-    dueRows.sort((a, b) => {
-      if (!a.dueDateObj && !b.dueDateObj) return 0;
-      if (!a.dueDateObj) return 1;
-      if (!b.dueDateObj) return -1;
-      return a.dueDateObj - b.dueDateObj;
-    });
-
-    let totalDiscount = 0;
-    let totalLateInterest = 0;
-    const paymentBreakdown = [];
-
-    for (const payment of paymentRows) {
-      let pendingPayment = payment.amountNum;
-      let paymentDiscount = 0;
-      let paymentLateInterest = 0;
-
-      for (const due of dueRows) {
-        if (pendingPayment <= 0 || due.remaining <= 0) continue;
-        const allocated = Math.min(pendingPayment, due.remaining);
-        due.remaining -= allocated;
-        pendingPayment -= allocated;
-
-        const basisDate =
-          form.discountType === "payment_before_agreement"
-            ? bookingDate
-            : form.computeBasis === "computation_date"
-              ? computationDate
-              : due.dueDateObj || computationDate;
-        if (!basisDate) continue;
-
-        const days = dayDiff(payment.paymentDateObj, basisDate);
-        if (days < 0) {
-          const discount = allocated * discountRate * (Math.abs(days) / 365);
-          paymentDiscount += discount;
-          totalDiscount += discount;
-        } else if (days > 0) {
-          const interest = allocated * lateInterestRate * (days / 365);
-          paymentLateInterest += interest;
-          totalLateInterest += interest;
-        }
-      }
-
-      paymentBreakdown.push({
-        ...payment,
-        discount: paymentDiscount,
-        interest: paymentLateInterest,
-      });
-    }
-
-    const totalDue = dueRows.reduce((sum, row) => sum + row.dueAmount, 0);
-    const totalPaid = paymentRows.reduce((sum, row) => sum + row.amountNum, 0);
-    const netAdjustment = totalLateInterest - totalDiscount;
-
-    setResult({
-      dueRows,
-      paymentBreakdown,
-      totalDue,
-      totalPaid,
-      totalDiscount,
-      totalLateInterest,
-      netAdjustment,
-      adjustedPayable: Math.max(totalDue + netAdjustment, 0),
-    });
-  };
-
   const totalSchedulePct = useMemo(
-    () => schedules.reduce((sum, row) => sum + Number(row.percent || 0), 0),
-    [schedules]
+    () => dueSchedule.reduce((sum, row) => sum + Number(normalisePercent(row.percent || 0)), 0),
+    [dueSchedule]
   );
+
+  const totalDueAmount = useMemo(
+    () => dueSchedule.reduce((sum, row) => sum + Number(row.rowAmount || 0), 0),
+    [dueSchedule]
+  );
+
+  const totalPayments = useMemo(
+    () => payments.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+    [payments]
+  );
+
+  const handleSaveFpv = async () => {
+    if (!selectedLienId) return;
+    const order = salesOrders.find((o) => o.id === selectedLienId);
+    if (!order) return;
+
+    const payload = {
+      sales_order_id: selectedLienId,
+      customer_id: order.customer_id,
+      calculation_date: form.computationDate ? new Date(form.computationDate) : new Date(),
+      interest_rate: form.lateInterestRate ? Number(form.lateInterestRate) : null,
+      total_agreement_value: form.agreementValue ? Number(form.agreementValue) : null,
+      discount_on_upfront: calculationSummary ? Number(calculationSummary.totalDiscount) : 0,
+      interest_on_late_payment: calculationSummary ? Number(calculationSummary.totalLateInterest) : 0,
+      net_fpv: calculationSummary ? Number(calculationSummary.netAdjustment) : null,
+      schedule_details: dueSchedule.map((row, index) => ({
+        id: row.id,
+        name: row.name,
+        percent: Number(normalisePercent(row.percent || 0)) || 0,
+        dueDate: row.dueDate,
+        rowAmount: row.rowAmount,
+        source: row.source,
+        sequence: index + 1,
+      })),
+      payment_details: payments.map((row) => ({
+        id: row.id,
+        reference: row.description,
+        paymentDate: row.date,
+        amount: row.amount,
+      })),
+    };
+
+    try {
+      await apiClient.post("/pricing/fpv-calculation", payload);
+      toast({ title: "Saved!", description: "FPV calculation saved successfully." });
+      refetchSavedFpv();
+    } catch (err) {
+      const message = getErrorMessage(err);
+      setError(message);
+      toast({ title: "Save Failed", description: message, variant: "destructive" });
+    }
+  };
 
   return (
     <div>
       <PageHeader
         title="Discount on Upfront Payment / Interest on Late Payment"
-        description="Sheet-style FPV computation using schedule due dates and payment dates"
+        description="Backend-driven FPV computation with database-backed milestones and FIFO payment allocation"
       />
       <Card>
         <CardHeader>
@@ -334,31 +297,24 @@ export default function FPVCalculation() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="space-y-1.5">
               <Label>Lien Name</Label>
               <Select
-                value={form.salesOrderId}
+                value={selectedLienId}
                 onValueChange={(value) => {
                   const order = salesOrders.find((o) => o.id === value);
-                  // Use the actual agreement amount if available, otherwise fallback
-                  // to total_value or basic_sale_value from the sales order payload.
-                  const agreementValue = Number(
-                    order?.agreement_value ?? order?.total_value ?? order?.basic_sale_value ?? 0
-                  );
-                  // Read current computationDate from form state directly — it is
-                  // already committed because we haven't changed it here.
-                  const computationDate = form.computationDate;
-                  setForm((p) => ({
-                    ...p,
+                  const agreementValue = Number(order?.agreement_value ?? order?.total_value ?? order?.basic_sale_value ?? 0);
+                  setSelectedLienId(value);
+                  setForm((prev) => ({
+                    ...prev,
                     salesOrderId: value,
-                    lienName:     order?.customer_name || order?.order_number || "",
+                    lienName: order?.customer_name || order?.order_number || "",
                     agreementValue: agreementValue > 0 ? String(agreementValue) : "",
-                    bookingDate:  order?.booking_date ? order.booking_date.split("T")[0] : p.bookingDate,
+                    bookingDate: order?.booking_date ? order.booking_date.split("T")[0] : "",
                   }));
-                  populateDueDetails(order, agreementValue, computationDate);
-                  setResult(null);
                   setError("");
+                  setCalculationSummary(null);
                 }}
               >
                 <SelectTrigger>
@@ -378,7 +334,7 @@ export default function FPVCalculation() {
               <Input
                 type="date"
                 value={form.computationDate}
-                onChange={(e) => setForm((p) => ({ ...p, computationDate: e.target.value }))}
+                onChange={(e) => setForm((prev) => ({ ...prev, computationDate: e.target.value }))}
               />
             </div>
             <div className="space-y-1.5">
@@ -386,7 +342,8 @@ export default function FPVCalculation() {
               <Input
                 type="date"
                 value={form.bookingDate}
-                onChange={(e) => setForm((p) => ({ ...p, bookingDate: e.target.value }))}
+                readOnly
+                className="bg-muted/50 cursor-not-allowed"
               />
             </div>
             <div className="space-y-1.5">
@@ -394,7 +351,7 @@ export default function FPVCalculation() {
               <Input
                 type="number"
                 value={form.lateInterestRate}
-                onChange={(e) => setForm((p) => ({ ...p, lateInterestRate: e.target.value }))}
+                onChange={(e) => setForm((prev) => ({ ...prev, lateInterestRate: e.target.value }))}
               />
             </div>
             <div className="space-y-1.5">
@@ -408,8 +365,8 @@ export default function FPVCalculation() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Compute Discount and Interest</Label>
-              <Select value={form.computeBasis} onValueChange={(value) => setForm((p) => ({ ...p, computeBasis: value }))}>
+              <Label>Compute Method</Label>
+              <Select value={form.computeBasis} onValueChange={(value) => setForm((prev) => ({ ...prev, computeBasis: value }))}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -420,8 +377,8 @@ export default function FPVCalculation() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Type of Discount</Label>
-              <Select value={form.discountType} onValueChange={(value) => setForm((p) => ({ ...p, discountType: value }))}>
+              <Label>Discount Type</Label>
+              <Select value={form.discountType} onValueChange={(value) => setForm((prev) => ({ ...prev, discountType: value }))}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -437,151 +394,181 @@ export default function FPVCalculation() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold">Due Details</h3>
-                {schedules.some((r) => r._isBilled) && (
-                  <p className="text-xs text-amber-600 flex items-center gap-1">
-                    <Wand2 className="w-3 h-3" />
-                    Auto-populated — billed rows highlighted
-                  </p>
-                )}
+                {isLoading ? <span className="text-xs text-slate-500">Loading schedule…</span> : null}
               </div>
-              <div className="space-y-2">
-                {schedules.map((row) => (
-                  <div
-                    key={row.id}
-                    className={`grid grid-cols-12 gap-2 items-center rounded-md p-1 ${
-                      row._isBilled ? "bg-amber-50 border border-amber-200" : ""
-                    }`}
-                  >
-                    <div className="col-span-4 flex items-center gap-1">
-                      <Input
-                        value={row.name}
-                        onChange={(e) => setScheduleField(row.id, "name", e.target.value)}
-                        placeholder="Schedule"
-                      />
-                      {row._isBilled && (
-                        <Badge variant="outline" className="text-[10px] shrink-0 border-amber-400 text-amber-700 bg-amber-50">
-                          Billed
-                        </Badge>
+
+              <div className="rounded-lg border border-slate-200 overflow-hidden shadow-sm">
+                <div className="max-h-[460px] overflow-y-auto overflow-x-auto relative">
+                  <Table className="w-full border-collapse">
+                    <TableHeader className="bg-slate-50/75 sticky top-0 z-20 backdrop-blur-sm border-b shadow-[0_1px_0_rgba(0,0,0,0.05)]">
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="w-[45px] text-center font-bold text-slate-700 py-2.5">#</TableHead>
+                        <TableHead className="min-w-[220px] font-bold text-slate-700 py-2.5">Milestone</TableHead>
+                        <TableHead className="w-[100px] text-center font-bold text-slate-700 py-2.5">Allocation %</TableHead>
+                        <TableHead className="w-[140px] font-bold text-slate-700 py-2.5">Due Date</TableHead>
+                        <TableHead className="w-[120px] text-right font-bold text-slate-700 py-2.5">Due Amount</TableHead>
+                        <TableHead className="w-[100px] text-center font-bold text-slate-700 py-2.5">Source</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {dueSchedule.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="py-6 text-center text-sm text-slate-500">
+                            Select a lien to load the backend schedule.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        dueSchedule.map((row, index) => (
+                          <TableRow key={row.id} className="border-b border-slate-100 odd:bg-white even:bg-slate-50/30">
+                            <TableCell className="text-center font-medium text-slate-400 py-2">{index + 1}</TableCell>
+                            <TableCell className="py-2 pr-2 text-sm font-medium text-slate-800">{row.name || "-"}</TableCell>
+                            <TableCell className="py-2 text-center text-sm font-semibold text-slate-800">{Number(normalisePercent(row.percent || 0)).toFixed(1)}%</TableCell>
+                            <TableCell className="py-2 text-sm text-slate-700">{row.dueDate || "-"}</TableCell>
+                            <TableCell className="py-2 text-right font-mono text-slate-800 font-semibold pr-4">₹{Number(row.rowAmount || 0).toLocaleString()}</TableCell>
+                            <TableCell className="py-2 text-center">
+                              <Badge variant={row.source === "Customer" ? "secondary" : "outline"} className="text-[10px] font-bold tracking-wide uppercase px-1.5 py-0.5 rounded border shadow-none">
+                                {row.source || "Presales"}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))
                       )}
-                    </div>
-                    <Input
-                      className="col-span-2"
-                      type="number"
-                      value={row.percent}
-                      onChange={(e) => setScheduleField(row.id, "percent", e.target.value)}
-                      placeholder="%"
-                    />
-                    <div className="col-span-3 flex items-center gap-1">
-                      <Input
-                        type="date"
-                        value={row.dueDate || ""}
-                        onChange={(e) => setScheduleField(row.id, "dueDate", e.target.value)}
-                      />
-                      {/* Days delta badge — updates live when either the row due date
-                          or the global computation date changes */}
-                      <span
-                        className={`text-[11px] font-medium shrink-0 px-1.5 py-0.5 rounded border ${
-                          row.days > 0
-                            ? "border-emerald-300 text-emerald-700 bg-emerald-50"
-                            : "border-muted text-muted-foreground bg-muted/30"
-                        }`}
-                        title="Calendar days: Due Date − Computation Date"
-                      >
-                        {row.days ?? 0}d
-                      </span>
-                    </div>
-                    <Input
-                      className="col-span-3"
-                      value={`₹${(row.rowAmount ?? 0).toLocaleString()}`}
-                      readOnly
-                    />
-                    <Button type="button" variant="outline" className="col-span-12 md:col-span-2" onClick={() => removeScheduleRow(row.id)}>
-                      Remove
-                    </Button>
-                  </div>
-                ))}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
-              <Button type="button" variant="outline" onClick={addScheduleRow}>
-                Add Due Row
-              </Button>
-              <p className={`text-xs ${totalSchedulePct === 100 ? "text-emerald-600" : "text-amber-600"}`}>
-                Total Schedule %: {totalSchedulePct.toFixed(2)}%
-              </p>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 space-y-2 text-slate-700 shadow-inner">
+                <div className="flex justify-between items-center text-xs font-medium pb-2 border-b border-slate-200">
+                  <span className="text-slate-500 uppercase tracking-wide">Financial Worksheet Summary</span>
+                  <span className="font-mono text-slate-400">{isLoading ? "Recalculating…" : "Auto-updating"}</span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pt-1">
+                  <div>
+                    <span className="text-xs text-slate-400 block font-semibold uppercase tracking-wider">Total Milestones</span>
+                    <span className="text-lg font-bold text-slate-800">{dueSchedule.length}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block font-semibold uppercase tracking-wider">Total Allocation</span>
+                    <span className={`text-lg font-bold ${totalSchedulePct === 100 ? "text-emerald-600" : "text-amber-600"}`}>{totalSchedulePct.toFixed(1)}%</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block font-semibold uppercase tracking-wider">Total Due Amount</span>
+                    <span className="text-lg font-bold text-slate-800">₹{formatCurrency(totalDueAmount)}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block font-semibold uppercase tracking-wider">Total Payments</span>
+                    <span className="text-lg font-bold text-slate-800">₹{formatCurrency(calculationSummary?.totalPaid ?? totalPayments)}</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pt-2 border-t border-slate-200/80">
+                  <div>
+                    <span className="text-xs text-slate-400 block font-semibold uppercase tracking-wider">Outstanding</span>
+                    <span className="text-base font-bold text-slate-800">₹{formatCurrency(calculationSummary?.outstanding ?? Math.max(totalDueAmount - totalPayments, 0))}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block font-semibold uppercase tracking-wider">Discount</span>
+                    <span className="text-base font-bold text-emerald-700">₹{formatCurrency(calculationSummary?.totalDiscount ?? 0)}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block font-semibold uppercase tracking-wider">Late Interest</span>
+                    <span className="text-base font-bold text-amber-700">₹{formatCurrency(calculationSummary?.totalLateInterest ?? 0)}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block font-semibold uppercase tracking-wider">Net Adjustment</span>
+                    <span className="text-base font-bold text-primary">₹{formatCurrency(calculationSummary?.netAdjustment ?? 0)}</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-3">
               <h3 className="text-sm font-semibold">Payment Details</h3>
+              <p className="text-xs text-slate-500">Each payment row is allocated to the earliest outstanding milestone using FIFO and recalculated automatically.</p>
               <div className="space-y-2">
                 {payments.map((row) => (
-                  <div key={row.id} className="grid grid-cols-12 gap-2">
+                  <div key={row.id} className="grid grid-cols-1 md:grid-cols-12 gap-2">
                     <Input
-                      className="col-span-4"
-                      value={row.reference}
-                      onChange={(e) => setPaymentField(row.id, "reference", e.target.value)}
-                      placeholder="Description/Cheque"
+                      className="md:col-span-4"
+                      value={row.description}
+                      onChange={(e) => handlePaymentChange(row.id, "description", e.target.value)}
+                      placeholder="Description / Cheque"
+                      disabled={!selectedLienId || row.source === "ledger"}
                     />
                     <Input
-                      className="col-span-4"
+                      className="md:col-span-4"
                       type="date"
-                      value={row.paymentDate}
-                      onChange={(e) => setPaymentField(row.id, "paymentDate", e.target.value)}
+                      value={row.date}
+                      onChange={(e) => handlePaymentChange(row.id, "date", e.target.value)}
+                      disabled={!selectedLienId || row.source === "ledger"}
                     />
                     <Input
-                      className="col-span-4"
+                      className="md:col-span-3"
                       type="number"
                       value={row.amount}
-                      onChange={(e) => setPaymentField(row.id, "amount", e.target.value)}
+                      onChange={(e) => handlePaymentChange(row.id, "amount", e.target.value)}
                       placeholder="Amount"
+                      disabled={!selectedLienId || row.source === "ledger"}
                     />
-                    <Button type="button" variant="outline" className="col-span-12 md:col-span-2" onClick={() => removePaymentRow(row.id)}>
-                      Remove
-                    </Button>
+                    {row.source === "ledger" ? (
+                      <div className="md:col-span-1 flex items-center justify-center text-[10px] font-semibold uppercase text-slate-500">
+                        Ledger
+                      </div>
+                    ) : (
+                      <Button type="button" variant="outline" className="md:col-span-1" onClick={() => handleRemovePayment(row.id)} disabled={!selectedLienId}>
+                        ×
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>
-              <Button type="button" variant="outline" onClick={addPaymentRow}>
+              <Button type="button" variant="outline" onClick={handleAddPayment} disabled={!selectedLienId}>
                 Add Payment Row
               </Button>
             </div>
           </div>
 
-          <Button className="w-full gap-2" onClick={calculate} disabled={!form.agreementValue || !form.salesOrderId}>
-            <Calculator className="w-4 h-4" /> Compute
-          </Button>
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              className="flex-1 gap-2 border-primary text-primary hover:bg-primary/5"
+              onClick={handleSaveFpv}
+              disabled={!selectedLienId || !form.agreementValue || isLoading}
+            >
+              <Save className="w-4 h-4" /> Save FPV Calculation
+            </Button>
+          </div>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="text-xs text-muted-foreground border rounded-md p-3 bg-muted/20">
             Formula used: <strong>Simple Interest (Actual/365)</strong>. <br />
-            Early payment discount = Allocated Amount × Discount Rate × Early Days / 365. <br />
-            Late payment interest = Allocated Amount × Late Interest Rate × Delay Days / 365.
+            Early payment discount = Allocated Amount × Interest Rate × Early Days / 365. <br />
+            Late payment interest = Allocated Amount × Interest Rate × Late Days / 365.
           </div>
 
-          {result && (
+          {calculationSummary && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="p-3 rounded-lg border bg-muted/20">
                   <p className="text-xs text-muted-foreground">Total Due</p>
-                  <p className="text-lg font-semibold">₹{Math.round(result.totalDue).toLocaleString()}</p>
+                  <p className="text-lg font-semibold">₹{formatCurrency(calculationSummary.totalDue)}</p>
                 </div>
                 <div className="p-3 rounded-lg border bg-muted/20">
                   <p className="text-xs text-muted-foreground">Total Paid</p>
-                  <p className="text-lg font-semibold">₹{Math.round(result.totalPaid).toLocaleString()}</p>
+                  <p className="text-lg font-semibold">₹{formatCurrency(calculationSummary.totalPaid)}</p>
                 </div>
                 <div className="p-3 rounded-lg border bg-emerald-50 border-emerald-200">
                   <p className="text-xs text-muted-foreground">Upfront Discount</p>
-                  <p className="text-lg font-semibold text-emerald-700">₹{Math.round(result.totalDiscount).toLocaleString()}</p>
+                  <p className="text-lg font-semibold text-emerald-700">₹{formatCurrency(calculationSummary.totalDiscount)}</p>
                 </div>
                 <div className="p-3 rounded-lg border bg-amber-50 border-amber-200">
                   <p className="text-xs text-muted-foreground">Late Interest</p>
-                  <p className="text-lg font-semibold text-amber-700">₹{Math.round(result.totalLateInterest).toLocaleString()}</p>
+                  <p className="text-lg font-semibold text-amber-700">₹{formatCurrency(calculationSummary.totalLateInterest)}</p>
                 </div>
               </div>
 
               <div className="p-4 rounded-lg border bg-primary/5">
                 <p className="text-xs text-muted-foreground">Net Adjustment (Interest - Discount)</p>
-                <p className="text-2xl font-bold text-primary">₹{Math.round(result.netAdjustment).toLocaleString()}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Adjusted Payable: ₹{Math.round(result.adjustedPayable).toLocaleString()}
-                </p>
+                <p className="text-2xl font-bold text-primary">₹{formatCurrency(calculationSummary.netAdjustment)}</p>
               </div>
 
               <div className="rounded-lg border overflow-x-auto">
@@ -590,19 +577,21 @@ export default function FPVCalculation() {
                     <tr>
                       <th className="text-left p-2">Payment Ref</th>
                       <th className="text-left p-2">Payment Date</th>
-                      <th className="text-right p-2">Amount</th>
-                      <th className="text-right p-2">Discount</th>
-                      <th className="text-right p-2">Late Interest</th>
+                      <th className="text-left p-2">Milestone</th>
+                      <th className="text-right p-2">Allocated</th>
+                      <th className="text-right p-2">Days</th>
+                      <th className="text-right p-2">Adjustment</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {result.paymentBreakdown.map((row) => (
-                      <tr key={row.id} className="border-t">
+                    {calculationSummary.allocations.map((row) => (
+                      <tr key={`${row.payment_id}-${row.milestone_id}`} className="border-t">
                         <td className="p-2">{row.reference || "-"}</td>
-                        <td className="p-2">{row.paymentDate || "-"}</td>
-                        <td className="p-2 text-right">₹{Math.round(row.amountNum).toLocaleString()}</td>
-                        <td className="p-2 text-right text-emerald-700">₹{Math.round(row.discount).toLocaleString()}</td>
-                        <td className="p-2 text-right text-amber-700">₹{Math.round(row.interest).toLocaleString()}</td>
+                        <td className="p-2">{row.payment_date || "-"}</td>
+                        <td className="p-2">{row.milestone_description || "-"}</td>
+                        <td className="p-2 text-right">₹{formatCurrency(row.allocated_amount || 0)}</td>
+                        <td className="p-2 text-right">{row.days_delta || 0}</td>
+                        <td className="p-2 text-right">₹{formatCurrency(row.adjustment || 0)}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -12,6 +12,7 @@ import { startInterestJob } from "./jobs/interestJob.js";
 import { syncHistoricalInterest } from "./utils/interestCalculator.js";
 import { calculateCustomerLedgerBalance } from "./utils/ledgerBalance.js";
 import { getLedgerSummarySync, getLedgerSummary, FinancialCalculationService, postLedgerEntry } from "./utils/ledgerFinancialService.js";
+import { calculateFinancialReconciliation } from "./utils/fpvCalculator.js";
 
 const PORT = Number(process.env.API_PORT || 4000);
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -88,6 +89,17 @@ app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json({ limit: "2mb" }));
 app.use("/api/pricing", pricingRoutes);
 app.use("/api/documents", documentsRoutes);
+
+// FPV reconciliation (compute-on-the-fly)
+app.post("/api/fpv/reconcile", authenticateToken, (req, res) => {
+  try {
+    const payload = req.body;
+    const result = calculateFinancialReconciliation(payload);
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+});
 
 const ensureStorage = async () => {
   await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');

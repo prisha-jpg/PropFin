@@ -172,3 +172,69 @@ export function calculateDynamicFPV(input: FPVInput): FPVOutput {
     },
   };
 }
+
+/**
+ * Hydrates a master schedule template with customer-specific booking and agreement dates.
+ * 
+ * - Row 1 (Booking Amount) is overridden with bookingDate.
+ * - Row 2 (Payable within 15 Days from Agreement Date) is overridden with agreementDate + 15 days.
+ * - Other milestones keep their targetDate / expectedDate.
+ * 
+ * @param masterSchedule - The list of milestone schedule rows.
+ * @param bookingDate - Customer's actual Date of Booking.
+ * @param agreementDate - Customer's actual Date of Agreement. Fallback to bookingDate if not provided.
+ * @returns The hydrated schedule with populated due dates.
+ */
+export function hydrateCustomerSchedule(
+  masterSchedule: any[],
+  bookingDate: Date | string,
+  agreementDate?: Date | string
+): any[] {
+  if (!bookingDate) return masterSchedule;
+
+  const parsedBooking = parseDate(bookingDate);
+  const parsedAgreement = agreementDate ? parseDate(agreementDate) : parsedBooking;
+
+  return masterSchedule.map((milestone, index) => {
+    const name = (milestone.milestone_name || milestone.name || "").toLowerCase();
+    
+    let hydratedDueDate: string | null = null;
+
+    if (index === 0 || name.includes("booking amount")) {
+      // Row 1 (Booking Amount): Date of Booking
+      hydratedDueDate = formatDateToYYYYMMDD(parsedBooking);
+    } else if (index === 1 || name.includes("15 days")) {
+      // Row 2 (Payable within 15 Days from Agreement Date): Agreement Date + 15 days
+      const target = new Date(parsedAgreement.getFullYear(), parsedAgreement.getMonth(), parsedAgreement.getDate());
+      target.setDate(target.getDate() + 15);
+      hydratedDueDate = formatDateToYYYYMMDD(target);
+    } else {
+      // Other milestones: keep configured target/expected date
+      const rawDate = milestone.target_date ?? milestone.targetDate ?? milestone.expected_date ?? milestone.expectedDate ?? milestone.dueDate ?? milestone.expectedDueDate;
+      if (rawDate) {
+        try {
+          const d = parseDate(rawDate);
+          hydratedDueDate = formatDateToYYYYMMDD(d);
+        } catch {
+          hydratedDueDate = "";
+        }
+      }
+    }
+
+    return {
+      ...milestone,
+      dueDate: hydratedDueDate || "",
+    };
+  });
+}
+
+/**
+ * Formats a Date object as a YYYY-MM-DD string.
+ */
+function formatDateToYYYYMMDD(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+

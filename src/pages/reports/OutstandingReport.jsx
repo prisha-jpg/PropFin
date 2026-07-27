@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/api/apiClient";
 import PageHeader from "../../components/shared/PageHeader";
 import DataTable from "../../components/shared/DataTable";
-import StatusBadge from "../../components/shared/StatusBadge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
