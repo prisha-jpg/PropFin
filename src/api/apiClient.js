@@ -104,6 +104,12 @@ export const apiClient = {
         body: JSON.stringify({ credential }),
       });
     },
+    updateProfile: async (data) => {
+      return await request("/auth/profile", {
+        method: "PUT",
+        body: JSON.stringify(data),
+      });
+    },
     logout: () => {
       window.localStorage.removeItem("propfin_access_token");
       window.localStorage.removeItem("token");

@@ -1033,6 +1033,34 @@ app.get("/api/auth/me", authenticateToken, async (req, res) => {
   }
 });
 
+app.put("/api/auth/profile", authenticateToken, async (req, res) => {
+  try {
+    const { full_name, phone, email } = req.body || {};
+    const updated = await prisma.users.update({
+      where: { id: req.user.id },
+      data: {
+        ...(full_name ? { full_name } : {}),
+        ...(phone ? { phone } : {}),
+        ...(email ? { email } : {}),
+      },
+    });
+
+    return res.json({
+      success: true,
+      user: {
+        id: updated.id,
+        employee_code: updated.employee_code,
+        full_name: updated.full_name,
+        email: updated.email,
+        phone: updated.phone,
+        role: updated.role,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 // ==========================================
 // UNIT SHIFTING ENDPOINTS
 // ==========================================
