@@ -212,7 +212,7 @@ const sanitizeInputForPrisma = (modelName, payload) => {
     const mappedData = {
       first_name: first_name,
       last_name: last_name,
-      full_name: payload.full_name || `${first_name} ${last_name || ""}`.trim(),
+      // Note: full_name is a DB-generated column in Postgres (GENERATED ALWAYS AS ...) — do NOT pass it on insert/update!
       phone_primary: payload.phone !== undefined ? payload.phone : (payload.phone_primary || ""),
       phone_secondary: payload.phone_secondary || null,
       email: payload.email || null,
@@ -232,6 +232,8 @@ const sanitizeInputForPrisma = (modelName, payload) => {
 
     if (payload.customer_code) {
       mappedData.customer_code = payload.customer_code;
+    } else {
+      mappedData.customer_code = `CIF${Date.now().toString(36).toUpperCase()}`;
     }
     return mappedData;
   }
