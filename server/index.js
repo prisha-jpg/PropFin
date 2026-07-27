@@ -2533,8 +2533,8 @@ app.post("/api/receipts/:id/bounce", authenticateToken, async (req, res) => {
 
 ensureStorage()
   .then(() => {
-    app.listen(PORT, "127.0.0.1", () => {
-      console.log(`Local API listening on http://127.0.0.1:${PORT}`);
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`API listening on port ${PORT}`);
       startInterestJob();
     });
   })
