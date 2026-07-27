@@ -117,6 +117,7 @@ const menuGroups = [
     label: "Setup",
     icon: Settings,
     items: [
+      { label: "Team Members", path: "/setup/team", icon: Users },
       { label: "Document Checklist", path: "/setup/document-checklist", icon: FileCheck },
       { label: "Project Demand Numbers", path: "/setup/demand-numbers", icon: FileText },
       { label: "Bank Master", path: "/setup/bank-master", icon: Landmark },

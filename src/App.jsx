@@ -48,6 +48,7 @@ import ProjectDemandNumbers from "@/pages/setup/ProjectDemandNumbers";
 import BankMasterPage from "@/pages/setup/BankMasterPage";
 import TDSAccountPage from "@/pages/setup/TDSAccountPage";
 import SystemSettings from "@/pages/setup/SystemSettings";
+import TeamMembers from "@/pages/setup/TeamMembers";
 
 function AuthenticatedApp() {
   const { isAuthenticated, isLoadingAuth } = useAuth();
@@ -112,6 +113,7 @@ function AuthenticatedApp() {
         <Route path="/interest/fpv" element={<FPVCalculation />} />
         
         {/* Setup & Others */}
+        <Route path="/setup/team" element={<TeamMembers />} />
         <Route path="/setup/document-checklist" element={<DocumentChecklistPage />} />
         <Route path="/setup/demand-numbers" element={<ProjectDemandNumbers />} />
         <Route path="/setup/bank-master" element={<BankMasterPage />} />

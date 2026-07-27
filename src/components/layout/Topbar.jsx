@@ -43,6 +43,7 @@ const pageTitles = {
   "/reminders/generate": "Generate Payment Reminder",
   "/reminders/inquiry": "Reminder Inquiry",
   "/interest/fpv": "FPV Calculation",
+  "/setup/team": "Team Members & User Management",
   "/setup/document-checklist": "Document Checklist Master",
   "/setup/demand-numbers": "Project Wise Demand Number",
   "/setup/bank-master": "Bank Master",

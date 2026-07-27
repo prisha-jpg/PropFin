@@ -236,6 +236,21 @@ const sanitizeInputForPrisma = (modelName, payload) => {
     return mappedData;
   }
 
+  if (modelName === "users") {
+    const userMapped = {
+      employee_code: payload.employee_code || `EMP-${Date.now().toString().slice(-4)}`,
+      full_name: payload.full_name || payload.name || "Team Member",
+      email: payload.email,
+      phone: payload.phone || null,
+      role: payload.role || "sales_executive",
+      is_active: payload.is_active !== undefined ? (payload.is_active === true || payload.is_active === "true") : true,
+    };
+    if (payload.password) {
+      userMapped.password_hash = hashPassword(payload.password);
+    }
+    return userMapped;
+  }
+
   if (modelName === "sales_orders") {
     const discount = toNumberOrZero(payload.discount);
     const gstAmount = toNumberOrZero(payload.gst_amount);
@@ -520,6 +535,7 @@ const normalizeRecord = (recordId, payload) => {
 
 const entityMap = {
   Customer: "customers",
+  User: "users",
   Project: "projects",
   Unit: "units",
   SalesOrder: "sales_orders",
@@ -627,6 +643,8 @@ const mapRelations = (modelName, row) => {
     mapped.phone = row.phone_primary || row.phone || "";
     mapped.address = row.address_line1 || row.address || "";
     mapped.status = row.status || (row.is_active ? "active" : "inactive");
+  } else if (modelName === "users") {
+    mapped.status = row.is_active !== false ? "active" : "inactive";
   } else if (modelName === "sales_orders") {
     if (row.customers) {
       mapped.customer_name = row.customers.full_name || `${row.customers.first_name} ${row.customers.last_name || ""}`.trim();
