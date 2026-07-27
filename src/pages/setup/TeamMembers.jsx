@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/api/apiClient";
+import { useAuth } from "@/lib/AuthContext";
+import { canManageTeam } from "@/lib/permissions";
 import PageHeader from "@/components/shared/PageHeader";
 import DataTable from "@/components/shared/DataTable";
 import StatsCard from "@/components/shared/StatsCard";
@@ -14,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { toast } from "sonner";
 import { 
-  UserPlus, Users, Shield, UserCheck, Edit3, Loader2, CheckCircle2 
+  UserPlus, Users, Shield, UserCheck, Edit3, Loader2, CheckCircle2, Lock 
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -37,6 +39,8 @@ const roleLabels = {
 };
 
 export default function TeamMembers() {
+  const { user } = useAuth();
+  const isManager = canManageTeam(user);
   const queryClient = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
@@ -206,17 +210,18 @@ export default function TeamMembers() {
         const isActive = row.is_active !== false;
         return (
           <button 
-            onClick={() => toggleUserStatus(row)}
+            onClick={() => isManager && toggleUserStatus(row)}
+            disabled={!isManager}
             className="focus:outline-none"
-            title="Click to toggle active status"
+            title={isManager ? "Click to toggle active status" : "Admin access required to change status"}
           >
             <Badge 
               variant="outline" 
-              className={`text-[11px] font-medium border px-2 py-0.5 cursor-pointer hover:opacity-80 transition-opacity ${
+              className={`text-[11px] font-medium border px-2 py-0.5 transition-opacity ${
                 isActive 
                   ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
                   : "bg-slate-100 text-slate-500 border-slate-200"
-              }`}
+              } ${isManager ? "cursor-pointer hover:opacity-80" : "cursor-not-allowed"}`}
             >
               {isActive ? "Active" : "Inactive"}
             </Badge>
@@ -238,14 +243,18 @@ export default function TeamMembers() {
       accessor: "actions",
       cell: (row) => (
         <div className="flex items-center gap-2">
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={() => handleOpenEdit(row)}
-            className="h-8 px-2 text-xs text-slate-600 hover:text-blue-600 hover:bg-blue-50"
-          >
-            <Edit3 className="w-3.5 h-3.5 mr-1" /> Edit
-          </Button>
+          {isManager ? (
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => handleOpenEdit(row)}
+              className="h-8 px-2 text-xs text-slate-600 hover:text-blue-600 hover:bg-blue-50"
+            >
+              <Edit3 className="w-3.5 h-3.5 mr-1" /> Edit
+            </Button>
+          ) : (
+            <span className="text-[10px] text-slate-400 font-medium">Read Only</span>
+          )}
         </div>
       ),
     },
@@ -257,9 +266,15 @@ export default function TeamMembers() {
         title="Team Members & User Management"
         description="Manage organizational roles, employee profiles, access permissions, and active status"
         actions={
-          <Button onClick={handleOpenAdd} className="gap-2 bg-blue-600 hover:bg-blue-700">
-            <UserPlus className="w-4 h-4" /> Add Team Member
-          </Button>
+          isManager ? (
+            <Button onClick={handleOpenAdd} className="gap-2 bg-blue-600 hover:bg-blue-700">
+              <UserPlus className="w-4 h-4" /> Add Team Member
+            </Button>
+          ) : (
+            <Badge variant="outline" className="text-xs px-3 py-1 bg-amber-50 text-amber-700 border-amber-200 gap-1.5">
+              <Lock className="w-3.5 h-3.5" /> Read-Only Mode (Admin Required)
+            </Badge>
+          )
         }
       />
 

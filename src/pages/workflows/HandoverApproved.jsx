@@ -1,15 +1,18 @@
 import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/api/apiClient";
+import { useAuth } from "@/lib/AuthContext";
+import { canApprove } from "@/lib/permissions";
 import PageHeader from "../../components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, XCircle } from "lucide-react";
+import { CheckCircle2, XCircle, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 
 export default function HandoverApproved() {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const { data: requests = [], isLoading } = useQuery({ queryKey: ["handoverRequests"], queryFn: () => apiClient.entities.HandoverRequest.list("-created_date", 200) });
 
@@ -49,11 +52,19 @@ export default function HandoverApproved() {
                       <p className="text-xs text-muted-foreground">Unit {r.unit_number || "-"} · {r.project_name || "-"}</p>
                       <p className="text-xs text-muted-foreground">Submitted {r.created_date ? format(new Date(r.created_date), "dd MMM yyyy") : "-"}</p>
                       <div className="flex flex-wrap gap-1">
-                        {lane.key === "pending" && <Button size="sm" variant="outline" onClick={() => updateMutation.mutate({ id: r.id, data: { status: "under_review" } })}>Move to Review</Button>}
-                        {(lane.key === "pending" || lane.key === "under_review") && (
+                        {!canApprove(user) && (lane.key === "pending" || lane.key === "under_review") ? (
+                          <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 font-medium flex items-center gap-1">
+                            <Lock className="w-2.5 h-2.5" /> Approver Access Required
+                          </span>
+                        ) : (
                           <>
-                            <Button size="sm" variant="outline" className="text-emerald-600" onClick={() => updateMutation.mutate({ id: r.id, data: { status: "approved", approval_date: new Date().toISOString().split("T")[0] } })}><CheckCircle2 className="w-3 h-3 mr-1" />Approve</Button>
-                            <Button size="sm" variant="outline" className="text-red-600" onClick={() => updateMutation.mutate({ id: r.id, data: { status: "rejected" } })}><XCircle className="w-3 h-3 mr-1" />Reject</Button>
+                            {lane.key === "pending" && <Button size="sm" variant="outline" onClick={() => updateMutation.mutate({ id: r.id, data: { status: "under_review" } })}>Move to Review</Button>}
+                            {(lane.key === "pending" || lane.key === "under_review") && (
+                              <>
+                                <Button size="sm" variant="outline" className="text-emerald-600" onClick={() => updateMutation.mutate({ id: r.id, data: { status: "approved", approval_date: new Date().toISOString().split("T")[0] } })}><CheckCircle2 className="w-3 h-3 mr-1" />Approve</Button>
+                                <Button size="sm" variant="outline" className="text-red-600" onClick={() => updateMutation.mutate({ id: r.id, data: { status: "rejected" } })}><XCircle className="w-3 h-3 mr-1" />Reject</Button>
+                              </>
+                            )}
                           </>
                         )}
                       </div>

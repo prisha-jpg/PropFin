@@ -1,14 +1,17 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/api/apiClient";
+import { useAuth } from "@/lib/AuthContext";
+import { canApprove } from "@/lib/permissions";
 import PageHeader from "../../components/shared/PageHeader";
 import ApprovalWorkflow from "../../components/shared/ApprovalWorkflow";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, ChevronDown, ChevronUp, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronUp, XCircle, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 
 function CancellationRequestRow({ r, isOpen, onToggle, updateMutation }) {
+  const { user } = useAuth();
   const { data: summary, isLoading } = useQuery({
     queryKey: ["ledgerSummary", r.sales_order_id],
     queryFn: async () => {
@@ -74,29 +77,37 @@ function CancellationRequestRow({ r, isOpen, onToggle, updateMutation }) {
               <div className="rounded-md border bg-white p-3">
                 <p className="text-xs text-muted-foreground mb-2">Actions</p>
                 <div className="flex flex-wrap gap-2">
-                  {r.status === "pending" && (
-                    <Button size="sm" variant="outline" onClick={() => updateMutation.mutate({ id: r.id, data: { status: "under_review" } })}>
-                      Review
-                    </Button>
-                  )}
-                  {(r.status === "pending" || r.status === "under_review") && (
+                  {!canApprove(user) ? (
+                    <span className="text-[11px] text-amber-700 bg-amber-50 px-2.5 py-1 rounded border border-amber-200 font-medium flex items-center gap-1">
+                      <Lock className="w-3 h-3" /> Approver Access Required
+                    </span>
+                  ) : (
                     <>
-                      <Button size="sm" variant="outline" className="text-emerald-700" onClick={() => updateMutation.mutate({ id: r.id, data: { status: "approved", approval_date: new Date().toISOString().split("T")[0] } })}>
-                        <CheckCircle2 className="w-3 h-3 mr-1" />Approve
-                      </Button>
-                      <Button size="sm" variant="outline" className="text-red-700" onClick={() => updateMutation.mutate({ id: r.id, data: { status: "rejected" } })}>
-                        <XCircle className="w-3 h-3 mr-1" />Reject
-                      </Button>
+                      {r.status === "pending" && (
+                        <Button size="sm" variant="outline" onClick={() => updateMutation.mutate({ id: r.id, data: { status: "under_review" } })}>
+                          Review
+                        </Button>
+                      )}
+                      {(r.status === "pending" || r.status === "under_review") && (
+                        <>
+                          <Button size="sm" variant="outline" className="text-emerald-700" onClick={() => updateMutation.mutate({ id: r.id, data: { status: "approved", approval_date: new Date().toISOString().split("T")[0] } })}>
+                            <CheckCircle2 className="w-3 h-3 mr-1" />Approve
+                          </Button>
+                          <Button size="sm" variant="outline" className="text-red-700" onClick={() => updateMutation.mutate({ id: r.id, data: { status: "rejected" } })}>
+                            <XCircle className="w-3 h-3 mr-1" />Reject
+                          </Button>
+                        </>
+                      )}
+                      {r.status === "approved" && (
+                        <Button size="sm" variant="outline" className="text-amber-700 border-amber-200 bg-amber-50 hover:bg-amber-100 hover:text-amber-800" onClick={() => {
+                          if (window.confirm("Are you sure you want to cancel this approved cancellation and restore the booking/original accounting?")) {
+                            updateMutation.mutate({ id: r.id, data: { status: "revoked" } });
+                          }
+                        }}>
+                          <XCircle className="w-3 h-3 mr-1" />Cancel Cancellation
+                        </Button>
+                      )}
                     </>
-                  )}
-                  {r.status === "approved" && (
-                    <Button size="sm" variant="outline" className="text-amber-700 border-amber-200 bg-amber-50 hover:bg-amber-100 hover:text-amber-800" onClick={() => {
-                      if (window.confirm("Are you sure you want to cancel this approved cancellation and restore the booking/original accounting?")) {
-                        updateMutation.mutate({ id: r.id, data: { status: "revoked" } });
-                      }
-                    }}>
-                      <XCircle className="w-3 h-3 mr-1" />Cancel Cancellation
-                    </Button>
                   )}
                 </div>
               </div>
