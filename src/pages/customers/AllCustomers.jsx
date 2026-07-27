@@ -80,7 +80,7 @@ export default function AllCustomers() {
     { header: "Email", accessor: "email", cell: row => <span className="text-muted-foreground">{row.email || "—"}</span> },
     { header: "City", accessor: "city", cell: row => row.city || "—" },
     { header: "PAN", accessor: "pan_number", cell: row => <span className="font-mono text-xs">{row.pan_number || "—"}</span> },
-    { header: "Status", accessor: "status", cell: row => <StatusBadge status={row.status} /> },
+    { header: "Status", accessor: "status", cell: row => <StatusBadge status={row.status || (row.is_active === false ? "inactive" : "active")} /> },
   ];
 
   const handleSubmit = (data) => {
