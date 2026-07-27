@@ -466,22 +466,22 @@ export default function PresalesHub() {
               </div>
             </CardContent>
             <CardContent className="p-0 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
-              <Table className="w-full min-w-[1200px] border-collapse">
+              <Table className="w-full min-w-[1350px] border-collapse">
                 <TableHeader className="sticky top-0 bg-white shadow-sm z-10 text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-200">
                   <TableRow>
-                    <TableHead className="px-4 py-3 text-left w-[120px]">Unit No.</TableHead>
-                    <TableHead className="px-4 py-3 text-left w-[120px]">Type</TableHead>
-                    <TableHead className="px-4 py-3 text-left w-[120px]">Block</TableHead>
-                    <TableHead className="px-4 py-3 text-left w-[100px]">Floor</TableHead>
-                    <TableHead className="px-4 py-3 text-right w-[140px]">SBA (Sq.Ft)</TableHead>
-                    <TableHead className="px-4 py-3 text-right w-[140px]">Rate (₹)</TableHead>
-                    <TableHead className="px-4 py-3 text-right w-[160px]">CAIC Charges</TableHead>
-                    <TableHead className="px-4 py-3 text-right text-slate-500">Base Sale Value</TableHead>
-                    <TableHead className="px-4 py-3 text-right w-[110px]">GST (%)</TableHead>
-                    <TableHead className="px-4 py-3 text-right text-slate-500">GST Charges</TableHead>
-                    <TableHead className="px-4 py-3 text-right w-[160px]">Maint. Deposit</TableHead>
-                    <TableHead className="px-4 py-3 text-right text-blue-600">Total Value</TableHead>
-                    <TableHead className="px-4 py-3 w-[50px]"></TableHead>
+                    <TableHead className="px-3 py-3 text-left w-[100px] min-w-[100px]">Unit No.</TableHead>
+                    <TableHead className="px-3 py-3 text-left w-[150px] min-w-[150px]">Type</TableHead>
+                    <TableHead className="px-3 py-3 text-left w-[150px] min-w-[150px]">Block</TableHead>
+                    <TableHead className="px-3 py-3 text-left w-[80px] min-w-[80px]">Floor</TableHead>
+                    <TableHead className="px-3 py-3 text-right w-[130px] min-w-[130px]">SBA (Sq.Ft)</TableHead>
+                    <TableHead className="px-3 py-3 text-right w-[130px] min-w-[130px]">Rate (₹)</TableHead>
+                    <TableHead className="px-3 py-3 text-right w-[150px] min-w-[150px]">CAIC Charges</TableHead>
+                    <TableHead className="px-3 py-3 text-right text-slate-500 min-w-[140px]">Base Sale Value</TableHead>
+                    <TableHead className="px-3 py-3 text-right w-[90px] min-w-[90px]">GST (%)</TableHead>
+                    <TableHead className="px-3 py-3 text-right text-slate-500 min-w-[130px]">GST Charges</TableHead>
+                    <TableHead className="px-3 py-3 text-right w-[150px] min-w-[150px]">Maint. Deposit</TableHead>
+                    <TableHead className="px-3 py-3 text-right text-blue-600 min-w-[150px]">Total Value</TableHead>
+                    <TableHead className="px-3 py-3 w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -499,16 +499,16 @@ export default function PresalesHub() {
                     const total = bsv > 0 ? bsv + gst + maintenance : 0;
                     return (
                       <TableRow key={row.unit_id} className="border-b border-slate-200 even:bg-slate-50/50 hover:bg-blue-50 transition-colors group">
-                        <TableCell className="px-4 py-3 text-left font-semibold text-slate-800">{row.unit}</TableCell>
-                        <TableCell className="px-4 py-3 text-left">
+                        <TableCell className="px-3 py-3 text-left font-semibold text-slate-800">{row.unit}</TableCell>
+                        <TableCell className="px-3 py-3 text-left">
                           <Input
                             value={row.type}
                             onChange={(e) => updateMasterList(row.unit_id, "type", e.target.value)}
-                            className="h-8 w-full px-2 py-1 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                            className="h-8 min-w-[120px] w-full px-2 py-1 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white font-medium"
                           />
                         </TableCell>
-                        <TableCell className="px-4 py-3 text-left text-slate-600">{row.block}</TableCell>
-                        <TableCell className="px-4 py-3 text-left">
+                        <TableCell className="px-3 py-3 text-left text-slate-600 font-medium whitespace-nowrap">{row.block}</TableCell>
+                        <TableCell className="px-3 py-3 text-left">
                           <Input
                             value={row.floor}
                             onChange={(e) => updateMasterList(row.unit_id, "floor", e.target.value)}
