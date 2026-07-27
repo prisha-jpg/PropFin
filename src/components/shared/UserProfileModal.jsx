@@ -4,10 +4,7 @@ import { apiClient } from "@/api/apiClient";
 import { toast } from "sonner";
 import { 
   Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle,
-  DialogDescription 
+  DialogContent 
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

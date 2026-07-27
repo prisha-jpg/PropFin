@@ -6,10 +6,10 @@ import StatsCard from "../components/shared/StatsCard";
 import StatusBadge from "../components/shared/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { 
-  Users, FileText, CreditCard, AlertTriangle, RefreshCw, 
-  Calculator, FileSpreadsheet, LayoutDashboard, ChevronRight, 
-  Send, StickyNote, User, Clock, Loader2, Building2, Plus,
-  TrendingUp, Wallet, CheckCircle2, FileCheck, ArrowUpRight
+  Users, FileText, AlertTriangle, RefreshCw, 
+  Calculator, FileSpreadsheet, LayoutDashboard, 
+  Send, StickyNote, User, Clock, Loader2, Plus,
+  TrendingUp, Wallet, FileCheck, ArrowUpRight
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
@@ -20,7 +20,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 
 const COLORS = ["#2563EB", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6"];
 

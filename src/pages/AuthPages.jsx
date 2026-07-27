@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Eye, EyeOff, Lock, Mail, User, Phone, ShieldCheck, Database, KeyRound } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail, User, Phone, ShieldCheck, KeyRound } from "lucide-react";
 
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "590748154695-kacpcrn0q5nbe4jmq4i7d1hce6v86i3i.apps.googleusercontent.com";
 
