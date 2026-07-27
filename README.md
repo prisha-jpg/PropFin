@@ -1,6 +1,6 @@
 # 🏢 PropFin — Real Estate CRM & Financial Compliance Engine
 
-![PropFin Logo](public/logo.svg)
+<img src="public/logo.svg" alt="PropFin Logo" width="100" />
 
 **PropFin** is a modern, high-performance Real Estate CRM and Financial Compliance Platform designed to manage customer profiles, master unit pricelists, bookings, sales orders, payment schedules, demand letters, payment receipts, and automated financial compliance (including late-payment interest accruals and FIFO waterfall receipt allocations).
 
