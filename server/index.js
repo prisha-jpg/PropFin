@@ -87,6 +87,10 @@ const authenticateToken = (req, res, next) => {
 const app = express();
 app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json({ limit: "2mb" }));
+app.use((req, _res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
 app.use("/api/pricing", pricingRoutes);
 app.use("/api/documents", documentsRoutes);
 
@@ -193,25 +197,28 @@ const sanitizeInputForPrisma = (modelName, payload) => {
   // In reality, Prisma throws on unknown fields. We will explicitly map the entities we know.
   if (modelName === "customers") {
     // Map full_name to first_name/last_name
-    let first_name = payload.full_name || payload.first_name || "Unknown";
-    let last_name = null;
+    let first_name = payload.first_name;
+    let last_name = payload.last_name;
     
-    if (payload.full_name && payload.full_name.includes(' ')) {
+    if (payload.full_name && payload.full_name.trim().includes(' ')) {
       const parts = payload.full_name.trim().split(' ');
       first_name = parts[0];
       last_name = parts.slice(1).join(' ');
+    } else if (payload.full_name) {
+      first_name = payload.full_name;
     }
+    if (!first_name) first_name = payload.first_name || "Unknown";
 
-    return {
-      customer_code: payload.customer_code || `CUST${Date.now()}`,
+    const mappedData = {
       first_name: first_name,
       last_name: last_name,
-      phone_primary: payload.phone || payload.phone_primary || "",
+      full_name: payload.full_name || `${first_name} ${last_name || ""}`.trim(),
+      phone_primary: payload.phone !== undefined ? payload.phone : (payload.phone_primary || ""),
       phone_secondary: payload.phone_secondary || null,
       email: payload.email || null,
       pan_number: payload.pan_number || null,
       aadhaar_number: payload.aadhaar_number || null,
-      address_line1: payload.address || payload.address_line1 || null,
+      address_line1: payload.address !== undefined ? payload.address : (payload.address_line1 || null),
       city: payload.city || null,
       state: payload.state || null,
       pincode: payload.pincode || null,
@@ -220,8 +227,13 @@ const sanitizeInputForPrisma = (modelName, payload) => {
       nationality: payload.nationality || "Indian",
       has_active_loan: payload.has_active_loan === true || payload.has_active_loan === "true",
       loan_account_number: payload.loan_account_number || null,
-      is_active: payload.status !== "inactive",
+      is_active: payload.status !== undefined ? payload.status !== "inactive" : true,
     };
+
+    if (payload.customer_code) {
+      mappedData.customer_code = payload.customer_code;
+    }
+    return mappedData;
   }
 
   if (modelName === "sales_orders") {
@@ -611,7 +623,11 @@ const mapRelations = (modelName, row) => {
   if (!row) return row;
   const mapped = { ...row };
   
-  if (modelName === "sales_orders") {
+  if (modelName === "customers") {
+    mapped.phone = row.phone_primary || row.phone || "";
+    mapped.address = row.address_line1 || row.address || "";
+    mapped.status = row.status || (row.is_active ? "active" : "inactive");
+  } else if (modelName === "sales_orders") {
     if (row.customers) {
       mapped.customer_name = row.customers.full_name || `${row.customers.first_name} ${row.customers.last_name || ""}`.trim();
       mapped.customer_code = row.customers.customer_code;

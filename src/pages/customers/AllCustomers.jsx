@@ -76,7 +76,7 @@ export default function AllCustomers() {
   const columns = [
     { header: "CIF Code", accessor: "customer_code", cell: row => <span className="font-mono text-xs font-semibold text-primary">{row.customer_code || "—"}</span> },
     { header: "Name", accessor: "full_name", cell: row => <span className="font-medium">{row.full_name}</span> },
-    { header: "Phone", accessor: "phone" },
+    { header: "Phone", accessor: "phone", cell: row => row.phone || row.phone_primary || "—" },
     { header: "Email", accessor: "email", cell: row => <span className="text-muted-foreground">{row.email || "—"}</span> },
     { header: "City", accessor: "city", cell: row => row.city || "—" },
     { header: "PAN", accessor: "pan_number", cell: row => <span className="font-mono text-xs">{row.pan_number || "—"}</span> },
