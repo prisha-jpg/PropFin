@@ -1,33 +1,61 @@
-# 🏢 PropFin — Real Estate CRM & Sales Finance Platform
+# 🏢 PropFin — Real Estate CRM & Financial Compliance Engine
 
-PropFin is a high-performance, modern Real Estate CRM and Sales Finance management system designed to track sales orders, payment schedules, receipts, and automate financial calculations like overdue interest accruals.
+![PropFin Logo](public/logo.svg)
 
-It is built with a **React (Vite) + Tailwind CSS** frontend and a **Node.js/Express + Prisma + PostgreSQL** backend.
+**PropFin** is a modern, high-performance Real Estate CRM and Financial Compliance Platform designed to manage customer profiles, master unit pricelists, bookings, sales orders, payment schedules, demand letters, payment receipts, and automated financial compliance (including late-payment interest accruals and FIFO waterfall receipt allocations).
 
 ---
 
-## ⚡ Key Highlights & Core Engines
+## 🌐 Live Production Links
 
-### 🏦 Sales & CRM Lifecycle
-- **Entity Management**: Comprehensive tracking of Projects, Blocks, Units, Customers, Sales Orders, and Co-applicants.
-- **Payment Journal & Receipts**: Record payment instruments, track cheque clearing, log cheque bounces, and apply bounce penalties.
-- **Documents & Workflows**: Generation and management of demand letters, payment reminder letters, builder NOCs, and refunds.
+- **Frontend Application (Vercel)**: [https://prop-fin.vercel.app](https://prop-fin.vercel.app)
+- **Backend API (Render)**: [https://propfin-backend.onrender.com](https://propfin-backend.onrender.com)
+- **Database**: Neon Serverless PostgreSQL 17
 
-### 📈 Pricing & Payment Schedule Engines
-- **Unit Pricing Engine**: Calculates classification rates, super built-up area pricing, caic charges, maintenance deposits, and GST.
-- **Payment Schedule Generator**: Automatically builds milestones based on template percentages, summing to 100% of the sale value.
+---
 
-### ⚙️ Overdue Interest Calculation Engine
-- **FIFO Waterfall Receipt Allocation**: Cleared customer receipts are dynamically allocated to unpaid milestone demands using a chronological FIFO waterfall model. Overdue interest is only computed on the actual remaining outstanding principal.
-- **Overdue Interest Start Date**: Penalty interest starts accruing strictly $1 \text{ day}$ after the milestone due date has elapsed.
-- **Daily Pro-Rata Chunking**: Mid-month customer payments split interest calculation into daily chunks to ensure pro-rata interest is charged accurately.
-- **Tax Compliance**: Automatically applies a **18% GST** surcharge on all late payment interest amounts.
-- **Automated Scheduler**: Background daily cron job (`node-cron` running at 23:50) that runs automated interest calculations on month-end.
+## 🔑 Demo & Team Login Credentials
 
-### 🔄 Just-In-Time (JIT) Historical Interest Sync & Database Self-Healing
-- **Database Self-Healing**: On ledger retrieval, the JIT sync engine deletes stale interest entries, recalculates the base outstanding balance (demands minus receipts and TDS) from scratch, posts correct interest entries, and updates the customer's total outstanding balance dynamically.
-- **Completed Months Only**: Safely backfills interest for fully closed calendar months, while ignoring current in-progress months.
-- **Concurrency Row-Lock Guard**: Runs JIT synchronization inside an ACID transaction with a database row lock (`SELECT FOR UPDATE`) on the customer record to prevent race conditions during rapid consecutive clicks.
+You can sign in using either your **Email Address** OR **Employee Code** (`EMP-XXXX`):
+
+| Team Member Name | Designation / Role | Email / Employee Code | Login Password |
+| :--- | :--- | :--- | :--- |
+| **Prisha Birla** | Administrator | `prishaa.birla@gmail.com` *or* `EMP-1001` | **`PropFin@2026`** |
+| **Rajesh Verma** | Sales Manager | `rajesh.verma@propfin.com` *or* `EMP-1002` | **`PropFin@2026`** |
+| **Ananya Deshmukh** | Finance Manager | `ananya.d@propfin.com` *or* `EMP-1003` | **`PropFin@2026`** |
+| **Vikram Malhotra** | Sales Executive | `vikram.m@propfin.com` *or* `EMP-1004` | **`PropFin@2026`** |
+| **System Administrator** | Administrator | `admin@propfin.local` *or* `EMP-0001` | **`PropFin@2026`** |
+
+---
+
+## ⚡ Key Modules & Platform Features
+
+### 👥 1. Team Members & User Management (RBAC)
+- **Role-Based Access Control**:
+  - **Administrator & Sales Manager**: Full administrative access, user management, and approval authority across all workflows.
+  - **Sales Executive & Finance Manager**: Operational access to post entries, customer bookings, and receipts; restricted from higher-authority approvals.
+- **User Profile Management**: Personal profile editor, avatar initials, password reset modal, and active account status toggling.
+
+### 🏗️ 2. Presales Configurator & Master Price List
+- **Master Unit Pricing**: Real-time master inventory table spanning multiple towers (Tower Serenity, Tower Horizon, Tower Pinnacle).
+- **Unit Configuration**: Super built-up area pricing, caic charges, classification rates, parking fees, GST calculations, and maintenance deposits.
+
+### 📋 3. Sales Orders & Customer Bookings
+- **Booking Engine**: Unit reservations, agreement values, payment milestone schedule generation (0% to 100% total value).
+- **Customer CRM**: Centralized customer records with primary phone numbers, PAN/Aadhaar compliance, and active/inactive status mapping.
+
+### 💸 4. Payment Journal & Receipts
+- **Instrument Tracking**: Cheque clearing logs, RTGS/NEFT payment receipts, cheque bounce penalty entries, and customer balances.
+
+### ⚙️ 5. Overdue Interest & Financial Engines
+- **FIFO Waterfall Receipt Allocation**: Customer receipts are allocated to unpaid demands in strict chronological order. Interest is computed only on actual net principal balance remaining.
+- **Tax & Accrual Rules**: 18% GST late interest surcharge, 1-day grace period enforcement, and daily pro-rata chunking for mid-month receipts.
+- **Just-In-Time (JIT) Self-Healing Sync**: Automatic recalculation and verification of customer ledger entries with transaction row-locking (`SELECT FOR UPDATE`).
+
+### 🔄 6. Workflows & Approvals
+- **Unit Cancellations & Refunds**: Cancellation request submissions, recovery fee calculations, net refund/owed computation, and multi-stage approval flows.
+- **Unit Handover Process**: Handover requests, document checklist verifications, and management sign-off boards.
+- **Shifting & Resale Requests**: Unit transfer logs and co-applicant resale assignments.
 
 ---
 
@@ -35,99 +63,59 @@ It is built with a **React (Vite) + Tailwind CSS** frontend and a **Node.js/Expr
 
 | Layer | Technologies |
 | :--- | :--- |
-| **Frontend** | React 18, Vite 6, Tailwind CSS, Lucide React, Framer Motion, TanStack Query (React Query) |
-| **Backend** | Node.js, Express, Prisma ORM, PostgreSQL |
-| **Utilities** | Date-fns, Node-cron, PG client |
+| **Frontend** | React 18, Vite 6, Tailwind CSS, Lucide React, TanStack Query (React Query) |
+| **Backend** | Node.js, Express.js, Prisma ORM |
+| **Database** | Neon Serverless PostgreSQL 17 |
+| **Deployment** | Vercel (Frontend CI/CD), Render (Backend Express Web Service) |
 
 ---
 
-## 🚀 Setup & Installation
+## 🚀 Local Development Setup
 
-### 1️⃣ Database Setup
-1. Open your local PostgreSQL database (e.g. via pgAdmin or psql).
-2. Create a new database named `propfin_app`.
-
-### 2️⃣ Configure Environment Variables
-Create a `.env` file in the project root directory:
+### 1️⃣ Clone & Configure Environment
+Create a `.env` file in the project root:
 
 ```env
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/propfin_app
-API_PORT=4000
-CORS_ORIGIN=http://localhost:5173
+DATABASE_URL="postgresql://neondb_owner:...@ep-autumn-hall-av9ritvt.c-11.us-east-1.aws.neon.tech/neondb?sslmode=require"
+PORT=4000
+VITE_API_URL=http://localhost:4000
 ```
-*Note: Update the database connection credentials/port as per your local setup.*
 
-### 3️⃣ Install Dependencies & Generate Client
+### 2️⃣ Install Dependencies & Push Database Schema
 ```bash
-# Install NPM packages
+# Install dependencies
 npm install
 
-# Generate Prisma Client
-npm run db:generate
+# Push Prisma Schema to PostgreSQL
+npx prisma db push
 
-# Deploy Schema Migrations
-npm run db:deploy
+# Generate Prisma Client
+npx prisma generate
 ```
 
-### 4️⃣ Start Frontend & Backend Services
-Run the following commands in separate terminals:
+### 3️⃣ Seed Sample Data
+```bash
+# Seed realistic units into Presales Hub
+node seed_units.js
+
+# Seed team members & credentials
+node seed_team.js
+```
+
+### 4️⃣ Start Frontend & Backend
+In separate terminal windows:
 
 ```bash
-# Start backend server on port 4000
+# Terminal 1: Backend Server (Port 4000)
 npm run server
 ```
 
 ```bash
-# Start Vite development server on port 5173
+# Terminal 2: Frontend Development Server (Port 5173)
 npm run dev
 ```
 
-Vite proxies `/api/*` requests directly to `http://localhost:4000`.
-
 ---
 
-## 🧪 Testing & Verification
-
-PropFin features a comprehensive suite of unit and integration tests.
-
-### Run Core Calculator Tests
-Validates standard late interest accruals, grace period rules, GST calculations, and database integrations:
-```bash
-node server/tests/interestCalculator.test.js
-```
-
-### Run JIT Sync Route Integration Tests
-Verifies JIT self-healing sync route, completed months filter, concurrency row-locking, and idempotency:
-```bash
-node server/tests/ledgerJitSync.test.js
-```
-
-### Run Cron Job & PRL Demand Integration Tests
-Verifies scheduled daily interest cron run, month-end filtering, and PRL demand grouping:
-```bash
-node server/tests/automatedCron.test.js
-```
-
-### Run Route-Level Interest Integration Tests
-Validates REST API endpoint `/api/pricing/calculate-interest` integration on active database records:
-```bash
-node server/tests/calculateInterestRoute.test.js
-```
-
----
-
-## 📁 Project Structure
-
-```
-├── prisma/                    # Prisma Database Schema and Migrations
-├── server/
-│   ├── index.js               # Main Express Server
-│   ├── routes/                # Express Route Handlers (Pricing, Documents, etc.)
-│   ├── jobs/                  # Automated Background Cron Jobs
-│   ├── utils/                 # Calculation Engines & JIT Sync Helpers
-│   └── tests/                 # Unit & Integration Test Suites
-├── src/                       # Frontend React Source Files
-│   ├── api/                   # API Client (using apiClient)
-│   ├── components/            # Shared UI Components
-│   └── pages/                 # CRM Dashboard and Reports Pages
-```
+## 📄 License
+PropFin CRM Platform © 2026. All rights reserved.
