@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" fill="none">
+  <defs>
+    <linearGradient id="propfin-logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#EC4899" />
+      <stop offset="35%" stop-color="#D946EF" />
+      <stop offset="70%" stop-color="#A855F7" />
+      <stop offset="100%" stop-color="#8B5CF6" />
+    </linearGradient>
+  </defs>
+  <!-- Top Left Quadrant -->
+  <path d="M 3 48 C 3 23 23 3 48 3 L 48 48 Z" fill="url(#propfin-logo-grad)" />
+  <!-- Top Right Quadrant -->
+  <path d="M 54 3 L 54 48 L 99 48 C 99 23 79 3 54 3 Z" fill="url(#propfin-logo-grad)" />
+  <!-- Bottom Right Quadrant -->
+  <path d="M 54 54 L 99 54 C 99 79 79 99 54 99 Z" fill="url(#propfin-logo-grad)" />
+  <!-- Bottom Left Quadrant (P-Stem) -->
+  <path d="M 3 118 L 3 80 C 3 65 23 54 48 54 L 48 118 Z" fill="url(#propfin-logo-grad)" />
+</svg>

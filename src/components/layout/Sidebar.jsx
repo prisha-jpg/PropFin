@@ -210,16 +210,18 @@ export default function Sidebar({ collapsed, onToggle }) {
       >
         {/* Header */}
         <div className="h-16 flex items-center px-4 border-b border-sidebar-border shrink-0">
-          {!collapsed && (
+          {!collapsed ? (
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-sidebar-primary flex items-center justify-center">
-                <Building2 className="w-4 h-4 text-sidebar-primary-foreground" />
-              </div>
+              <img src="/logo.svg" alt="PropFin" className="w-8 h-8 shrink-0 drop-shadow-sm" />
               <div>
-                <h1 className="text-sm font-bold text-sidebar-foreground tracking-tight">SalesFinance</h1>
+                <h1 className="text-sm font-extrabold text-sidebar-foreground tracking-tight flex items-center gap-0.5">
+                  Prop<span className="text-pink-500">Fin</span>
+                </h1>
                 <p className="text-[10px] text-sidebar-foreground/50 font-medium">CRM Platform</p>
               </div>
             </div>
+          ) : (
+            <img src="/logo.svg" alt="PropFin" className="w-7 h-7 mx-auto drop-shadow-sm" />
           )}
           <button
             onClick={onToggle}

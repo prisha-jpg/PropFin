@@ -148,10 +148,12 @@ export default function AuthPages() {
       <div className="relative z-10 w-full max-w-md my-auto">
         {/* Branding header */}
         <div className="flex flex-col items-center mb-6 text-center">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center mb-4 shadow-lg shadow-blue-500/20 border border-blue-400/20">
-            <Database className="text-white h-7 w-7" />
+          <div className="w-16 h-16 rounded-2xl bg-white/10 backdrop-blur-md p-2 flex items-center justify-center mb-3 shadow-xl shadow-pink-500/10 border border-white/10">
+            <img src="/logo.svg" alt="PropFin Logo" className="w-full h-full object-contain" />
           </div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">PropFin</h1>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight flex items-center gap-1">
+            Prop<span className="text-pink-500">Fin</span>
+          </h1>
           <p className="text-slate-400 text-xs mt-1 font-medium tracking-wide uppercase">Property Financials & Compliance Engine</p>
         </div>
 
