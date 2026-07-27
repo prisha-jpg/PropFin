@@ -20,7 +20,6 @@ You can sign in using either your **Email Address** OR **Employee Code** (`EMP-X
 
 | Team Member Name | Designation / Role | Email / Employee Code | Login Password |
 | :--- | :--- | :--- | :--- |
-| **Prisha Birla** | Administrator | `prishaa.birla@gmail.com` *or* `EMP-1001` | **`PropFin@2026`** |
 | **Rajesh Verma** | Sales Manager | `rajesh.verma@propfin.com` *or* `EMP-1002` | **`PropFin@2026`** |
 | **Ananya Deshmukh** | Finance Manager | `ananya.d@propfin.com` *or* `EMP-1003` | **`PropFin@2026`** |
 | **Vikram Malhotra** | Sales Executive | `vikram.m@propfin.com` *or* `EMP-1004` | **`PropFin@2026`** |
